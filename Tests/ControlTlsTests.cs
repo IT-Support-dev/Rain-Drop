@@ -14,12 +14,14 @@ namespace RainDrop.Tests;
 public class ControlTlsTests : IDisposable
 {
     private readonly X509Certificate2 _ca = RepoCertificates.CreateCa();
+    private readonly X509Certificate2 _caPublic;
     private readonly X509Certificate2 _client;
     private readonly X509Certificate2 _agent;
     private readonly ECDsa _challenge = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
     public ControlTlsTests()
     {
+        _caPublic = new X509Certificate2(_ca.RawData);
         using var caKey = _ca.GetECDsaPrivateKey()!;
         _client = RepoCertificates.IssueClient(_ca, caKey);
         _agent = RepoCertificates.IssueAgent(_ca, caKey, Guid.NewGuid().ToString("N"), "TEST-PC", new[] { "127.0.0.1" });
@@ -27,7 +29,7 @@ public class ControlTlsTests : IDisposable
 
     public void Dispose()
     {
-        _ca.Dispose(); _client.Dispose(); _agent.Dispose(); _challenge.Dispose();
+        _ca.Dispose(); _caPublic.Dispose(); _client.Dispose(); _agent.Dispose(); _challenge.Dispose();
     }
 
     private static X509Certificate2 IssueWithValidity(X509Certificate2 ca, string eku, DateTime notBefore, DateTime notAfter)
@@ -49,7 +51,7 @@ public class ControlTlsTests : IDisposable
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var serverPolicy = new ControlTlsPolicy(_ca, serverRevoked ?? new RevocationState(), ControlRole.MasterClient);
+        var serverPolicy = new ControlTlsPolicy(_caPublic, serverRevoked ?? new RevocationState(), ControlRole.MasterClient);
         Task server = Task.Run(async () =>
         {
             using var tcp = await listener.AcceptTcpClientAsync();
@@ -64,9 +66,9 @@ public class ControlTlsTests : IDisposable
             var options = new SslClientAuthenticationOptions
             {
                 TargetHost = "127.0.0.1",
-                CertificateChainPolicy = new ControlTlsPolicy(_ca, new RevocationState(), ControlRole.AgentServer).ChainPolicy(),
+                CertificateChainPolicy = new ControlTlsPolicy(_caPublic, new RevocationState(), ControlRole.AgentServer).ChainPolicy(),
                 RemoteCertificateValidationCallback = (_, cert, chain, errors) =>
-                    new ControlTlsPolicy(_ca, new RevocationState(), ControlRole.AgentServer).Validate(cert, chain, errors, out _),
+                    new ControlTlsPolicy(_caPublic, new RevocationState(), ControlRole.AgentServer).Validate(cert, chain, errors, out string _),
             };
             // The server must close the connection because no client certificate was supplied.
             await ExpectClosedAsync(async () =>
@@ -82,7 +84,7 @@ public class ControlTlsTests : IDisposable
             {
                 using var ssl = await ControlTls.AuthenticateClientAsync(
                     client.GetStream(), "127.0.0.1", cert,
-                    new ControlTlsPolicy(_ca, new RevocationState(), ControlRole.AgentServer), CancellationToken.None);
+                    new ControlTlsPolicy(_caPublic, new RevocationState(), ControlRole.AgentServer), CancellationToken.None);
                 while (await ssl.ReadAsync(new byte[1]) > 0) { }
             });
         }
@@ -154,7 +156,7 @@ public class ControlTlsTests : IDisposable
             using var tcp = new TcpClient();
             await tcp.ConnectAsync(IPAddress.Loopback, port);
             using var ssl = await ControlTls.AuthenticateClientAsync(tcp.GetStream(), "127.0.0.1", _client,
-                new ControlTlsPolicy(_ca, new RevocationState(), ControlRole.AgentServer), CancellationToken.None);
+                new ControlTlsPolicy(_caPublic, new RevocationState(), ControlRole.AgentServer), CancellationToken.None);
             var (type, nonce) = await Protocol.ReadAsync(ssl);
             Assert.Equal(MsgType.AuthChallenge, type);
             await Protocol.WriteAsync(ssl, MsgType.AuthResponse, Protocol.Sign(_challenge, nonce));
