@@ -25,18 +25,24 @@
 
 ## โครงสร้าง
 
+ทุกอย่างอยู่ที่รากรีโป (ไม่มีโฟลเดอร์ `RainDrop/` ซ้อนอีกชั้น)
+
 ```
-RainDrop/
-├─ Shared/   โปรโตคอลที่ใช้ร่วมกัน (รูปแบบแพ็กเก็ต, คำสั่ง, การเซ็น/ตรวจลายเซ็น) + หน้าต่างแชท + ตัวอัดเสียง
+├─ Core/         โพรโทคอล/ตรรกะที่ไม่ผูก Windows (net8.0 ล้วน): รูปแบบแพ็กเก็ต, MsgType + record ข้อความ,
+│                HubProtocol, Discovery, การเซ็น/ตรวจ ECDSA — คง namespace เดิม RainDrop.Shared
+├─ Shared/       โค้ด UI/เสียงที่ใช้ร่วมกัน (WinForms): หน้าต่างแชท, ตัวอัดเสียง, คอลเสียง, ธีม, HubClient
+│                (อ้างอิง Core สำหรับโพรโทคอล แทนการมีโค้ดซ้ำ)
 ├─ Agent/        ติดตั้งบนเครื่องลูก: TCP server, จับภาพจอ, จำลองอินพุต, ล็อกจอ, ไอคอนถาดระบบ
 ├─ AgentService/ Windows Service (สิทธิ์ SYSTEM) คอยเปิด Agent ตอนบูต/ปลุกกลับ + บล็อกเว็บผ่าน hosts
 ├─ Hub/          เซิร์ฟเวอร์กลางของห้องชุมชน (แชทกลุ่ม/คอลเสียง/แชร์ไฟล์)
 ├─ Master/       ติดตั้งบนเครื่องผู้ดูแล: หน้าจอรวม + หน้าต่างควบคุม
+├─ Tests/        เทสต์ xunit ของ Core (round-trip โพรโทคอล, เซ็น/ตรวจ ECDSA, เฟรมเสียง/ชังก์ไฟล์)
 ├─ assets/       ไอคอนหยดน้ำ (raindrop.ico)
-├─ installer/             สคริปต์ Inno Setup ของตัวติดตั้งทั้งสองตัว
-├─ build-installer.bat    สร้างตัวติดตั้งสำเร็จรูป
-├─ build.bat              build อย่างเดียว
-└─ install-agent.ps1      ติดตั้งเครื่องลูกด้วยสคริปต์แทนตัวติดตั้ง
+├─ installer/    สคริปต์ Inno Setup ของตัวติดตั้งทั้งสองตัว
+├─ .github/workflows/ci.yml   CI บน windows-latest: build Release + test
+├─ build-installer.bat        สร้างตัวติดตั้งสำเร็จรูป
+├─ build.bat                  build อย่างเดียว
+└─ install-agent.ps1          ติดตั้งเครื่องลูกด้วยสคริปต์แทนตัวติดตั้ง
 ```
 
 ```
@@ -107,6 +113,19 @@ build.bat
 
 ผลลัพธ์อยู่ที่ `publish\Agent\RainDrop.Agent.exe` และ `publish\Master\RainDrop.Master.exe`
 (build แบบ self-contained จึงไม่ต้องติดตั้ง .NET Runtime บนเครื่องลูก)
+
+### บิลด์ทั้งโซลูชันและรันเทสต์
+
+โปรเจกต์ WinForms (Shared/Agent/Master/Hub) เป็น `net8.0-windows` จึงต้องบิลด์บน **Windows**
+ส่วน `Core` และ `Tests` เป็น `net8.0` ล้วน ไม่ผูก Windows (บิลด์/เทสต์บนแพลตฟอร์มใดก็ได้ที่มี .NET 8 SDK)
+
+```bat
+dotnet build -c Release
+dotnet test Tests/Tests.csproj -c Release
+```
+
+CI (`.github/workflows/ci.yml`) รันสองคำสั่งนี้บน `windows-latest` ทุกครั้งที่ push หรือเปิด PR
+(ไม่ตั้งค่า code signing เพราะยังไม่มีใบรับรอง)
 
 ## ติดตั้งเองแบบไม่ใช้ตัวติดตั้ง
 
@@ -262,10 +281,9 @@ RainDrop-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PASSWORD=mypa
 | ข้อจำกัด | แนวทางแก้ในเวอร์ชันถัดไป |
 |---|---|
 | ข้อมูลไม่ได้เข้ารหัส (มีการยืนยันตัวตนแต่ภาพหน้าจอวิ่งเป็น plaintext บน LAN) | ห่อ stream ด้วย `SslStream` (TLS) |
-| Agent ทำงานในสิทธิ์ผู้ใช้ ผู้ใช้จึงปิดผ่าน Task Manager ได้ และจับภาพหน้า UAC/Lock screen ไม่ได้ | แยกเป็น Windows Service (session 0) + ตัวช่วยที่ service สั่งรันในแต่ละ session ด้วย `CreateProcessAsUser` |
+| Agent รันในเซสชันผู้ใช้ (มี Service คอยปลุกกลับ) จึงจับภาพหน้า UAC/Lock screen ไม่ได้ | การจับ secure desktop ต้องรันส่วนจับภาพใน session 0 ซึ่งซับซ้อนและอยู่นอกขอบเขตปัจจุบัน |
 | ส่งภาพเต็มเฟรม JPEG ทุกครั้ง (ใช้แบนด์วิดท์มาก) | ส่งเฉพาะส่วนที่เปลี่ยน (dirty rectangles) หรือใช้ Desktop Duplication API + H.264 |
 | ล็อกจอบล็อก Ctrl+Alt+Del ไม่ได้ | เป็นข้อจำกัดของ Windows |
-| ต้องเพิ่ม IP ทีละเครื่อง | เพิ่มการค้นหาเครื่องอัตโนมัติด้วย UDP broadcast และจัดกลุ่มตามห้อง |
 | ผู้ใช้ที่รู้วิธี อาจอ่าน token จาก environment ของโปรเซสตัวเองเพื่อหยุด Service โดยไม่ต้องใช้รหัส | ให้ Service ตรวจรหัสผ่านผ่าน named pipe แทนการใช้ token ในไฟล์ |
 | ประวัติแชทไม่ถูกบันทึกลงไฟล์ | บันทึกเป็นไฟล์ log แยกตามเครื่อง/วัน |
 | ห้องชุมชน: ไฟล์ที่แชร์ไปก่อนหน้า คนที่เข้าทีหลังโหลดไม่ได้ (Hub เก็บแต่ข้อความ ไม่เก็บไฟล์) | ให้ Hub เก็บไฟล์ชั่วคราวและให้ดาวน์โหลดย้อนหลัง |

@@ -14,4 +14,9 @@
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- โพรโทคอล/ตรรกะที่ไม่ผูก Windows ย้ายไปอยู่ Core แล้ว Shared อ้างอิงแทนการมีโค้ดซ้ำ -->
+    <ProjectReference Include="..\Core\Core.csproj" />
+  </ItemGroup>
+
 </Project>

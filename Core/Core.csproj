@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    โพรโทคอลและตรรกะที่ใช้ร่วมกันแบบไม่ผูกแพลตฟอร์ม (net8.0 ล้วน ไม่มี WinForms / ไม่ผูก Windows)
+    จึงอ้างอิงจากโปรเจกต์ทดสอบและรันบน CI ได้ทุกแพลตฟอร์ม
+    โค้ดที่ย้ายมาคง namespace เดิมไว้ (RainDrop.Shared) โปรเจกต์อื่นจึงไม่ต้องแก้ using
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RainDrop.Core</AssemblyName>
+    <RootNamespace>RainDrop.Shared</RootNamespace>
+  </PropertyGroup>
+
+</Project>

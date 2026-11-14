@@ -1,7 +1,10 @@
+# build artifacts
 bin/
 obj/
 publish/
-.vs/
-master-private.pem
-keys/
 installer-output/
+.vs/
+
+# secrets / keys (ต้องหมุนกุญแจหากเคยหลุดเข้า git)
+keys/
+*.pem
