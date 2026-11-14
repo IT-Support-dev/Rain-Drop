@@ -12,6 +12,7 @@ internal sealed class MainForm : Form
 {
     private readonly MasterSettings _settings;
     private readonly MasterKey _key;
+    private readonly MasterPki _pki;
     private readonly FlowLayoutPanel _panel;                 // ตารางจอภาพ (เนื้อหาจริง)
     private readonly FlowLayoutPanel _channelList = new();   // รายการ "ช่อง" = เครื่องลูก (แถบซ้าย)
     private readonly FlowLayoutPanel _memberList = new();    // รายชื่อออนไลน์ (แถบขวา)
@@ -35,6 +36,7 @@ internal sealed class MainForm : Form
 
         _settings = MasterSettings.Load();
         _key = MasterKey.LoadOrCreate();
+        _pki = MasterPki.LoadOrCreate();
 
         BackColor = DiscordTheme.Content;
         _panel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = DiscordTheme.Content, Padding = new Padding(10) };
@@ -166,6 +168,9 @@ internal sealed class MainForm : Form
         menu.Items.Add("รีสตาร์ท", null, (_, _) => Power(PowerAction.Restart, "รีสตาร์ท"));
         menu.Items.Add("ล็อกออฟ", null, (_, _) => Power(PowerAction.Logoff, "ล็อกออฟ"));
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("ส่งออก enrollment bundle...", null, (_, _) => ExportEnrollment());
+        menu.Items.Add("เพิกถอนเครื่องที่เลือก", null, (_, _) => RevokeSelected());
+        menu.Items.Add("ตรวจสอบ audit chain", null, (_, _) => VerifyAudit());
         menu.Items.Add("ตั้งค่า / กุญแจ", null, (_, _) => ShowSettings());
         menu.Show(Cursor.Position);
     }
@@ -348,7 +353,7 @@ internal sealed class MainForm : Form
 
     private void AddTile(HostEntry host)
     {
-        var tile = new HostTile(host, _settings, _key);
+        var tile = new HostTile(host, _settings, _key, _pki);
         tile.OpenRemoteRequested += (_, _) => OpenRemote(tile);
         tile.ChatReceived += OnChatReceived;
         tile.VoiceReceived += OnVoiceReceived;
@@ -505,9 +510,9 @@ internal sealed class MainForm : Form
         OpenRemote(tile);
     }
 
-    private void OpenRemote(HostTile tile) => new RemoteForm(tile.Host, _settings, _key).Show();
+    private void OpenRemote(HostTile tile) => new RemoteForm(tile.Host, _settings, _key, _pki).Show();
 
-    private void OpenActivity(HostTile tile) => new ActivityForm(tile.Host, _settings, _key).Show();
+    private void OpenActivity(HostTile tile) => new ActivityForm(tile.Host, _settings, _key, _pki).Show();
 
     private void OpenActivityForSelected()
     {
@@ -768,13 +773,65 @@ internal sealed class MainForm : Form
         var answer = MessageBox.Show(this,
             $"ลายนิ้วมือกุญแจของ Master:  {_key.Fingerprint}\n" +
             "(ต้องตรงกับที่เครื่องลูกแสดง: คลิกขวาไอคอนโล่ → สถานะการเชื่อมต่อ)\n\n" +
-            "กุญแจสาธารณะของ Master อยู่ที่:\n" + MasterKey.PublicPath +
-            "\n\nตอนติดตั้งเครื่องลูกด้วย RainDrop-Agent-Setup.exe ให้เลือกไฟล์นี้ในหน้า \"กุญแจสาธารณะของ Master\"" +
-            "\n(หรือส่ง /PUBLICKEY= ในโหมดเงียบ) ถ้าติดตั้งเอง ให้คัดลอกไฟล์นี้ไปวางข้าง RainDrop.Agent.exe แล้วเปลี่ยนชื่อเป็น agent-public.pem" +
-            "\n\nกุญแจลับถูกเข้ารหัสด้วย DPAPI เก็บที่ master-private.dpapi (คัดลอกไปเครื่องอื่นก็ถอดไม่ได้) ห้ามลบหรือย้าย\n\nเปิดโฟลเดอร์เลยไหม?",
+            "ตั้งแต่ C2a การติดตั้ง Agent ใช้ enrollment bundle (.rdrop) ที่มีรหัสผ่าน แทน master-public.pem\n" +
+            "เมนู เพิ่มเติม → ส่งออก enrollment bundle สำหรับเครื่องใหม่\n\n" +
+            "CA public: " + MasterPki.CaPublicPath + "\n" +
+            "กุญแจลับ CA/Master เข้ารหัส DPAPI CurrentUser ในโฟลเดอร์นี้ ห้ามลบหรือย้าย\n\nเปิดโฟลเดอร์เลยไหม?",
             "กุญแจยืนยันตัวตน", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
         if (answer == DialogResult.Yes)
-            Process.Start("explorer.exe", $"/select,\"{MasterKey.PublicPath}\"");
+            Process.Start("explorer.exe", $"/select,\"{MasterPki.CaPublicPath}\"");
+    }
+
+    private void ExportEnrollment()
+    {
+        var values = Prompt.Show(this, "ส่งออก enrollment bundle",
+            ("ชื่อเครื่องลูก (ต้องตรงกับชื่อ Windows):", ""),
+            ("IP/ชื่อโฮสต์เพิ่มเติม คั่นด้วยจุลภาค:", ""));
+        if (values is null || string.IsNullOrWhiteSpace(values[0])) return;
+        var secret = Prompt.ShowWithSecrets(this, "รหัส enrollment bundle",
+            ("รหัสอย่างน้อย 12 ตัวอักษร:", "", true));
+        if (secret is null) return;
+        using var dialog = new SaveFileDialog { Filter = "Rain Drop enrollment (*.rdrop)|*.rdrop", FileName = values[0] + ".rdrop" };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            byte[] bundle = _pki.ExportEnrollment(values[0], values[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                secret[0], File.ReadAllText(MasterKey.PublicPath));
+            File.WriteAllBytes(dialog.FileName, bundle);
+            MessageBox.Show(this, "ส่งออกแล้ว: " + dialog.FileName + "\nใช้ไฟล์นี้ตอนติดตั้ง Agent แทน master-public.pem\nรหัส bundle ใช้ครั้งเดียวตอนติดตั้ง ไม่ถูกเก็บในไฟล์",
+                "Enrollment", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "ส่งออกไม่สำเร็จ", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void RevokeSelected()
+    {
+        var targets = Targets();
+        if (targets.Count == 0 || !Confirm($"เพิกถอนใบรับรอง {targets.Count} เครื่อง? ต้อง enroll ใหม่ก่อนใช้งานต่อ")) return;
+        foreach (var tile in targets)
+        {
+            try
+            {
+                var snapshot = _pki.Revoke(tile.Host.Name);
+                tile.Client?.SendJson(ControlMessages.RevocationList, snapshot);
+                tile.Reconnect();
+                _status.Text = "เพิกถอนแล้ว: " + tile.Host.Name;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, tile.Host.Name + ": " + ex.Message, "เพิกถอนไม่สำเร็จ", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+
+    private void VerifyAudit()
+    {
+        var result = AuditLog.Verify(MasterPki.AuditFolder);
+        MessageBox.Show(this, result.Valid ? $"audit ถูกต้อง ({result.Records} รายการ)" : "audit ไม่ถูกต้อง: " + result.Error,
+            "Audit", MessageBoxButtons.OK, result.Valid ? MessageBoxIcon.Information : MessageBoxIcon.Error);
     }
 
     private bool Confirm(string text) =>
@@ -789,6 +846,8 @@ internal sealed class MainForm : Form
         _discoveryCts.Cancel();
         foreach (var chat in _chats.Values) chat.ForceClose();
         foreach (var tile in _tiles) tile.Dispose();
+        _pki.Dispose();
+        _key.Dispose();
         base.OnFormClosed(e);
     }
 }

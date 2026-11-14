@@ -13,6 +13,7 @@ internal sealed class RemoteForm : Form
     private readonly HostEntry _host;
     private readonly MasterSettings _settings;
     private readonly MasterKey _key;
+    private readonly MasterPki _pki;
     private readonly PictureBox _pic;
     private readonly ToolStripButton _controlButton;
     private readonly ToolStripLabel _statusLabel;
@@ -20,11 +21,12 @@ internal sealed class RemoteForm : Form
     private AgentClient? _client;
     private long _lastMoveTicks;
 
-    public RemoteForm(HostEntry host, MasterSettings settings, MasterKey key)
+    public RemoteForm(HostEntry host, MasterSettings settings, MasterKey key, MasterPki pki)
     {
         _host = host;
         _settings = settings;
         _key = key;
+        _pki = pki;
 
         Text = $"ควบคุมระยะไกล - {host.Name} ({host.Address})";
         Icon = AppIcon.Load();
@@ -86,7 +88,7 @@ internal sealed class RemoteForm : Form
                     _client = null;
                     _statusLabel.Text = "กำลังเชื่อมต่อ...";
                     var (host, port) = _host.Resolve(_settings.Port);
-                    _client = await AgentClient.ConnectAsync(host, port, _key, token);
+                    _client = await AgentClient.ConnectAsync(host, port, _key, _pki, _host.Name, token);
                 }
 
                 var bmp = await _client.RequestScreenAsync(1920, 65, token);

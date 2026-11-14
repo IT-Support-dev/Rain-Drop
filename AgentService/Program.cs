@@ -3,6 +3,13 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using RainDrop.AgentService;
 
+if (args.Length == 1 && args[0] == "--verify-audit")
+{
+    var result = RainDrop.Shared.AuditLog.Verify(ServiceStore.AuditFolder);
+    Console.WriteLine(result.Valid ? $"audit valid ({result.Records} records)" : "audit invalid: " + result.Error);
+    return result.Valid ? 0 : 1;
+}
+
 // ชื่อ Service: RainDropAgentSvc
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddWindowsService(options => options.ServiceName = "RainDropAgentSvc");
@@ -13,3 +20,4 @@ builder.Logging.AddEventLog(settings => settings.SourceName = "Rain Drop Agent S
 
 var host = builder.Build();
 host.Run();
+return 0;

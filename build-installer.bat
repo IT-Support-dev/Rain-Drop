@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 chcp 65001 >nul
 setlocal
 REM ============================================================
@@ -38,7 +38,7 @@ echo [3/5] Build Hub (เซิร์ฟเวอร์กลาง)...
 REM ---------- [4] กุญแจสาธารณะ (ไม่สร้าง/แจกกุญแจลับตอน build อีกต่อไป - เฟส C1) ----------
 echo [4/5] เตรียมกุญแจสาธารณะ...
 REM Master สร้างคู่กุญแจเองตอนเปิดครั้งแรก เก็บกุญแจลับเข้ารหัส DPAPI ที่ %%AppData%%\RainDrop
-REM ตัวติดตั้งไม่ฝังกุญแจใด ๆ: ผู้ติดตั้งเครื่องลูกเลือก master-public.pem เองตอนติดตั้ง
+REM ตัวติดตั้งไม่ฝังกุญแจใด ๆ: ผู้ติดตั้งเครื่องลูกเลือก enrollment bundle (.rdrop) เฉพาะเครื่องตอนติดตั้ง
 REM ส่วน Hub ต้องใช้กุญแจสาธารณะชุดเดียวกัน: export จาก Master แล้ววางที่ keys\master-public.pem
 if exist keys\master-public.pem (
   copy /y keys\master-public.pem publish\Hub\hub-key.pem >nul

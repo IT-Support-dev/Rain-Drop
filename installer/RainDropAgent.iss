@@ -2,15 +2,15 @@
 ;  Rain Drop Agent - ตัวติดตั้งสำหรับเครื่องลูก
 ;  สร้างด้วย build-installer.bat
 ;
-;  เฟส C1: ตัวติดตั้งไม่ฝังกุญแจใด ๆ และไม่มีรหัสผ่านเริ่มต้นอีกต่อไป
-;  ผู้ติดตั้งต้องเตรียม 2 อย่าง:
+;  เฟส C2a: ตัวติดตั้งไม่ฝังกุญแจใด ๆ และไม่มีรหัสผ่านเริ่มต้น
+;  ผู้ติดตั้งต้องเตรียม 3 อย่าง:
 ;    1) รหัสผ่านผู้ดูแล ยาวอย่างน้อย 8 ตัวอักษร (ห้ามว่าง)
-;    2) ไฟล์ master-public.pem ที่ export จากเครื่อง Master
-;       (Master: ปุ่ม "ตั้งค่า / กุญแจ" หรือ RainDrop.Master.exe --export-public-key <โฟลเดอร์>)
+;    2) ไฟล์ enrollment bundle (.rdrop) ที่ส่งออกเฉพาะเครื่องนี้จาก Master
+;    3) รหัสของ bundle นั้น (อย่างน้อย 12 ตัวอักษร ใช้ถอด PKCS#12 ตอนติดตั้งเท่านั้น)
 ;
-;  ติดตั้งแบบเงียบ (ต้องส่งทั้งสองค่า ไม่งั้นตัวติดตั้งล้มเหลวทันที):
+;  ติดตั้งแบบเงียบ (ต้องส่งครบ ไม่งั้นล้มเหลวทันที):
 ;    RainDrop-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
-;        /PASSWORD=YourStrongPass /PUBLICKEY=C:\deploy\master-public.pem
+;        /PASSWORD=YourStrongPass /BUNDLE=C:\deploy\PC-01.rdrop /BUNDLEPASSWORD=YourBundlePass12
 ; ============================================================
 
 #define AppName    "Rain Drop Agent"
@@ -46,7 +46,7 @@ UsedUserAreasWarning=no
 [Files]
 Source: "..\publish\Agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Source: "..\publish\AgentService\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
-; ไม่มีการฝัง master-public.pem ตอน build แล้ว ผู้ติดตั้งเลือกไฟล์เองในหน้าถัดไป
+; ไม่ฝัง enrollment bundle ตอน build ผู้ติดตั้งเลือกไฟล์เฉพาะเครื่องในหน้าถัดไป
 ; สคริปต์ตรวจสอบปัญหาการเชื่อมต่อ
 Source: "..\diagnose-agent.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -60,13 +60,11 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\CapabilityAccessM
     ValueType: string; ValueName: "Value"; ValueData: "Allow"
 
 [Run]
-; 1) คัดลอกกุญแจสาธารณะที่ผู้ติดตั้งเลือก (ไม่ฝังมากับตัวติดตั้ง)
-Filename: "{cmd}"; Parameters: "/c copy /y ""{code:GetPublicKeyPath}"" ""{app}\agent-public.pem"""; \
-    Flags: runhidden waituntilterminated; StatusMsg: "คัดลอกกุญแจสาธารณะ..."
-; 2) เขียนค่าตั้ง: agent.json (ไม่มีรหัส) + private\credentials.json (PBKDF2 hash)
-Filename: "{app}\{#AppExe}"; Parameters: "--init-config ""{commonappdata}\RainDrop"" ""{code:GetPassword}"" {#Port} ""{code:GetHub}"""; \
-    Flags: runhidden waituntilterminated; StatusMsg: "กำลังตั้งค่า..."
-; 3) ปิดสิทธิ์เขียนของ Users บนโฟลเดอร์ค่าตั้ง (ใช้ SID เพื่อไม่ขึ้นกับภาษาของ Windows)
+
+; 1) ถอด enrollment bundle ด้วยรหัส แล้วเขียน identity ลง private ที่ Users เข้าไม่ได้
+Filename: "{app}\{#AppExe}"; Parameters: "--enroll ""{commonappdata}\RainDrop"" ""{code:GetBundlePath}"" ""{code:GetBundlePassword}"" ""{code:GetPassword}"" {#Port} ""{code:GetHub}"""; \
+    Flags: runhidden waituntilterminated; StatusMsg: "กำลังลงทะเบียนเครื่อง..."
+; 2) ปิดสิทธิ์เขียนของ Users บนโฟลเดอร์ค่าตั้ง (ใช้ SID เพื่อไม่ขึ้นกับภาษาของ Windows)
 ;    S-1-5-18 = SYSTEM, S-1-5-32-544 = Administrators, S-1-5-32-545 = Users
 Filename: "{sys}\icacls.exe"; \
     Parameters: """{commonappdata}\RainDrop"" /inheritance:r /grant:r ""*S-1-5-18:(OI)(CI)F"" ""*S-1-5-32-544:(OI)(CI)F"" ""*S-1-5-32-545:(OI)(CI)RX"""; \
@@ -75,7 +73,7 @@ Filename: "{sys}\icacls.exe"; \
 Filename: "{sys}\icacls.exe"; \
     Parameters: """{commonappdata}\RainDrop\private"" /inheritance:r /grant:r ""*S-1-5-18:(OI)(CI)F"" ""*S-1-5-32-544:(OI)(CI)F"""; \
     Flags: runhidden waituntilterminated
-; 4) เปิดไฟร์วอลล์ทุกโปรไฟล์ (เครือข่ายใหม่ใน Windows มักถูกตั้งเป็น Public)
+; 3) เปิดไฟร์วอลล์ทุกโปรไฟล์ (เครือข่ายใหม่ใน Windows มักถูกตั้งเป็น Public)
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Rain Drop Agent"""; \
     Flags: runhidden waituntilterminated
 Filename: "{sys}\netsh.exe"; \
@@ -84,7 +82,7 @@ Filename: "{sys}\netsh.exe"; \
 Filename: "{sys}\netsh.exe"; \
     Parameters: "advfirewall firewall add rule name=""Rain Drop Agent"" dir=in action=allow protocol=UDP localport={#Port} profile=any"; \
     Flags: runhidden waituntilterminated
-; 5) ติดตั้งและตั้งค่า Windows Service (สิทธิ์ SYSTEM, เริ่มอัตโนมัติตอนบูต)
+; 4) ติดตั้งและตั้งค่า Windows Service (สิทธิ์ SYSTEM, เริ่มอัตโนมัติตอนบูต)
 Filename: "{sys}\sc.exe"; Parameters: "stop {#SvcName}"; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "delete {#SvcName}"; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; \
@@ -107,9 +105,10 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 [Code]
 var
   PasswordPage: TInputQueryWizardPage;
-  KeyPage: TInputFileWizardPage;
+  BundlePage: TInputFileWizardPage;
+  BundlePasswordPage: TInputQueryWizardPage;
 
-// อ่านค่าจากบรรทัดคำสั่ง เช่น /PASSWORD=xxx หรือ /PUBLICKEY=C:\path\key.pem
+// อ่านค่าจากบรรทัดคำสั่ง เช่น /PASSWORD=xxx หรือ /BUNDLE=C:\path\PC-01.rdrop
 function CmdlineParam(const Name: String): String;
 var
   i: Integer;
@@ -138,11 +137,18 @@ begin
     Result := PasswordPage.Values[0];
 end;
 
-function GetPublicKeyPath(Param: String): String;
+function GetBundlePath(Param: String): String;
 begin
-  Result := CmdlineParam('/PUBLICKEY');
-  if (Result = '') and Assigned(KeyPage) then
-    Result := KeyPage.Values[0];
+  Result := CmdlineParam('/BUNDLE');
+  if (Result = '') and Assigned(BundlePage) then
+    Result := BundlePage.Values[0];
+end;
+
+function GetBundlePassword(Param: String): String;
+begin
+  Result := CmdlineParam('/BUNDLEPASSWORD');
+  if (Result = '') and Assigned(BundlePasswordPage) then
+    Result := BundlePasswordPage.Values[0];
 end;
 
 function GetHub(Param: String): String;
@@ -171,12 +177,17 @@ begin
     Exit;
   end;
 
-  k := CmdlineParam('/PUBLICKEY');
+  k := CmdlineParam('/BUNDLE');
   if (k = '') or (not FileExists(k)) then
   begin
-    Log('Rain Drop: ติดตั้งแบบเงียบล้มเหลว - ต้องระบุ /PUBLICKEY= ไปยังไฟล์ master-public.pem ที่มีอยู่จริง');
-    SuppressibleMsgBox('ติดตั้งแบบเงียบต้องระบุ /PUBLICKEY= ไปยังไฟล์ master-public.pem ที่ได้จากเครื่อง Master',
-      mbCriticalError, MB_OK, MB_OK);
+    Log('Rain Drop: ติดตั้งแบบเงียบล้มเหลว - ต้องระบุ /BUNDLE= ไปยังไฟล์ .rdrop ที่มีอยู่จริง');
+    SuppressibleMsgBox('ติดตั้งแบบเงียบต้องระบุ /BUNDLE= ไปยังไฟล์ enrollment ของเครื่องนี้', mbCriticalError, MB_OK, MB_OK);
+    Result := False;
+    Exit;
+  end;
+  if Length(CmdlineParam('/BUNDLEPASSWORD')) < 12 then
+  begin
+    SuppressibleMsgBox('ติดตั้งแบบเงียบต้องระบุ /BUNDLEPASSWORD= อย่างน้อย 12 ตัวอักษร', mbCriticalError, MB_OK, MB_OK);
     Result := False;
     Exit;
   end;
@@ -192,12 +203,17 @@ begin
   PasswordPage.Add('รหัสผ่านผู้ดูแล (อย่างน้อย {#MinPasswordLen} ตัวอักษร):', True);
   PasswordPage.Add('เซิร์ฟเวอร์ชุมชน (เช่น 192.168.1.10):', False);
 
-  KeyPage := CreateInputFilePage(PasswordPage.ID,
-    'กุญแจสาธารณะของ Master',
-    'เลือกไฟล์ master-public.pem ที่ได้จากเครื่อง Master',
-    'บนเครื่อง Master เปิด Rain Drop Master แล้วกด "ตั้งค่า / กุญแจ" เพื่อเปิดโฟลเดอร์ที่มีไฟล์นี้' + #13#10 +
-    'ตัวติดตั้งไม่ฝังกุญแจมาให้อีกต่อไป และไม่ต้องใช้กุญแจลับบนเครื่องลูก');
-  KeyPage.Add('ไฟล์ master-public.pem:', 'PEM files (*.pem)|*.pem|All files (*.*)|*.*', '.pem');
+  BundlePage := CreateInputFilePage(PasswordPage.ID,
+    'Enrollment bundle ของเครื่องนี้',
+    'เลือกไฟล์ .rdrop ที่ส่งออกเฉพาะเครื่องนี้จาก Master',
+    'Master: เพิ่มเติม → ส่งออก enrollment bundle' + #13#10 +
+    'ไฟล์นี้มีใบรับรองและกุญแจลับของ Agent เข้ารหัสด้วยรหัสผ่าน ห้ามใช้ไฟล์เดียวกันหลายเครื่อง');
+  BundlePage.Add('ไฟล์ enrollment:', 'Rain Drop enrollment (*.rdrop)|*.rdrop|All files (*.*)|*.*', '.rdrop');
+  BundlePasswordPage := CreateInputQueryPage(BundlePage.ID,
+    'รหัสของ enrollment bundle',
+    'ใส่รหัสที่ใช้ตอนส่งออกไฟล์นี้จาก Master',
+    'รหัสนี้ใช้ถอดกุญแจตอนติดตั้งเท่านั้น ไม่ถูกเก็บลงเครื่องลูก');
+  BundlePasswordPage.Add('รหัส bundle (อย่างน้อย 12 ตัวอักษร):', True);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -214,11 +230,20 @@ begin
     end;
   end;
 
-  if Assigned(KeyPage) and (CurPageID = KeyPage.ID) then
+  if Assigned(BundlePage) and (CurPageID = BundlePage.ID) then
   begin
-    if not FileExists(KeyPage.Values[0]) then
+    if not FileExists(BundlePage.Values[0]) then
     begin
-      MsgBox('ไม่พบไฟล์กุญแจสาธารณะที่เลือก กรุณาเลือกไฟล์ master-public.pem จากเครื่อง Master', mbError, MB_OK);
+      MsgBox('ไม่พบไฟล์ enrollment ที่เลือก', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+  end;
+  if Assigned(BundlePasswordPage) and (CurPageID = BundlePasswordPage.ID) then
+  begin
+    if Length(BundlePasswordPage.Values[0]) < 12 then
+    begin
+      MsgBox('รหัส bundle ต้องยาวอย่างน้อย 12 ตัวอักษร', mbError, MB_OK);
       Result := False;
       Exit;
     end;

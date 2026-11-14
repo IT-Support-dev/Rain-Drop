@@ -1,6 +1,8 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using RainDrop.Shared;
 
 namespace RainDrop.AgentService;
@@ -27,6 +29,12 @@ internal static class ServiceStore
     public static string CredentialsPath => Path.Combine(PrivateFolder, "credentials.json");
     public static string BlocklistPath => Path.Combine(Root, "blocklist.json");
     public static string AgentConfigPath => Path.Combine(Root, "agent.json");
+    public static string CertificatePath => Path.Combine(PrivateFolder, "agent-cert.der");
+    public static string PrivateKeyPath => Path.Combine(PrivateFolder, "agent-key.pkcs8");
+    public static string CaPath => Path.Combine(PrivateFolder, "ca-cert.der");
+    public static string RevocationPath => Path.Combine(PrivateFolder, "revocation.json");
+    public static string AllowlistPath => Path.Combine(PrivateFolder, "run-allowlist.json");
+    public static string AuditFolder => Path.Combine(PrivateFolder, "audit");
 
     internal sealed class Credentials
     {
@@ -42,6 +50,10 @@ internal static class ServiceStore
 
         Directory.CreateDirectory(PrivateFolder);
         ApplyPrivateAcl(PrivateFolder);
+        Directory.CreateDirectory(AuditFolder);
+        ApplyPrivateAcl(AuditFolder);
+        if (!File.Exists(AllowlistPath))
+            File.WriteAllText(AllowlistPath, JsonSerializer.Serialize(new RunAllowlist(new List<string>())));
 
         log($"ตรวจสิทธิ์โฟลเดอร์ค่าตั้งแล้ว: {Root}");
     }
@@ -110,4 +122,38 @@ internal static class ServiceStore
     public static void SaveBlocklist(BlockRules normalized) =>
         File.WriteAllText(BlocklistPath,
             JsonSerializer.Serialize(normalized, new JsonSerializerOptions { WriteIndented = true }));
+
+    /// <summary>Load the endpoint identity. The private key is released only over the PID-checked local pipe.</summary>
+    public static (X509Certificate2 Certificate, X509Certificate2 Ca, RevocationList Revocation, RunAllowlist Allowlist)? LoadIdentity(Action<string> log)
+    {
+        try
+        {
+            if (!File.Exists(CertificatePath) || !File.Exists(PrivateKeyPath) || !File.Exists(CaPath)) return null;
+            using var publicCert = new X509Certificate2(File.ReadAllBytes(CertificatePath));
+            var key = ECDsa.Create();
+            key.ImportPkcs8PrivateKey(File.ReadAllBytes(PrivateKeyPath), out _);
+            var certificate = publicCert.CopyWithPrivateKey(key);
+            var ca = new X509Certificate2(File.ReadAllBytes(CaPath));
+            var revocation = File.Exists(RevocationPath)
+                ? JsonSerializer.Deserialize<RevocationList>(File.ReadAllText(RevocationPath)) ?? new RevocationList(1, new List<string>())
+                : new RevocationList(1, new List<string>());
+            var allowlist = RunCommandPolicy.Load(AllowlistPath);
+            return (certificate, ca, revocation, allowlist);
+        }
+        catch (Exception ex)
+        {
+            log("อ่าน identity ของ Agent ไม่สำเร็จ การเชื่อมต่อ TLS จะถูกปฏิเสธ: " + ex.GetType().Name);
+            return null;
+        }
+    }
+
+    public static void SaveRevocation(RevocationList incoming)
+    {
+        var current = File.Exists(RevocationPath)
+            ? JsonSerializer.Deserialize<RevocationList>(File.ReadAllText(RevocationPath)) ?? new RevocationList(1, new List<string>())
+            : new RevocationList(1, new List<string>());
+        var state = new RevocationState(current);
+        state.Apply(incoming); // rejects rollback before touching the protected file
+        File.WriteAllText(RevocationPath, JsonSerializer.Serialize(state.Snapshot()));
+    }
 }

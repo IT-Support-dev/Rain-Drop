@@ -39,7 +39,7 @@ Name: "desktopicon"; Description: "สร้างไอคอนบน Desktop"
 Source: "..\publish\Master\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 ; ไม่ฝังคู่กุญแจใด ๆ ในตัวติดตั้งอีกต่อไป
 ; Master จะสร้างคู่กุญแจเองตอนเปิดครั้งแรก เก็บกุญแจลับเข้ารหัสด้วย DPAPI ที่ %AppData%\RainDrop
-; แล้วส่งออกเฉพาะ master-public.pem ให้ผู้ติดตั้งเครื่องลูกผ่านปุ่ม "ตั้งค่า / กุญแจ"
+; แล้วส่งออก enrollment bundle (.rdrop) เฉพาะเครื่องให้ผู้ใช้ติดตั้ง Agent ผ่านเมนู "เพิ่มเติม"
 
 [Registry]
 ; อนุญาตให้ใช้ไมโครโฟน (สำหรับข้อความเสียง) ทั้งระดับเครื่องและสำหรับโปรแกรมแบบ Desktop

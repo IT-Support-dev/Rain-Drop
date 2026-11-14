@@ -2,6 +2,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Text.Json;
 using RainDrop.Shared;
@@ -22,6 +23,24 @@ internal static class Program
             if (AgentConfig.WriteInitial(args[1], args[2], port, hub, out string initError)) return 0;
             Console.Error.WriteLine("ตั้งรหัสผ่านไม่สำเร็จ: " + initError);
             return 1;
+        }
+
+        // C2a enrollment: ถอด PKCS#12 ด้วยรหัส แล้วเก็บ key/cert ใน private ที่ Users เข้าไม่ได้
+        if (args.Length >= 4 && args[0] == "--enroll")
+        {
+            int port = args.Length >= 6 && int.TryParse(args[5], out int ep) ? ep : Protocol.DefaultPort;
+            string hub = args.Length >= 7 ? args[6] : "";
+            if (args.Length < 5) { Console.Error.WriteLine("usage: --enroll <folder> <bundle> <bundle-password> <admin-password> [port] [hub]"); return 1; }
+            if (AgentConfig.Enroll(args[1], args[2], args[3], args[4], port, hub, out string enrollError)) return 0;
+            Console.Error.WriteLine("enroll ไม่สำเร็จ: " + enrollError);
+            return 1;
+        }
+        if (args.Length == 1 && args[0] == "--verify-audit")
+        {
+            var result = ServiceClient.VerifyAudit(out string? auditError);
+            if (result is null) { Console.Error.WriteLine(auditError); return 1; }
+            Console.WriteLine(result.Ok ? "audit valid" : "audit invalid: " + result.AuditError);
+            return result.Ok ? 0 : 1;
         }
 
         // ให้รันได้แค่ 1 ตัวต่อ session ของผู้ใช้ (ถ้า Service ปลุกซ้ำจะไม่เปิดซ้อน)
@@ -55,7 +74,8 @@ internal sealed class AgentConfig
     public static string ConfigPath => Path.Combine(SharedFolder, "agent.json");
 
     /// <summary>กุญแจสาธารณะอยู่ข้างไฟล์โปรแกรม (Program Files) ซึ่งผู้ใช้ทั่วไปเขียนทับไม่ได้</summary>
-    public static string PublicKeyPath => Path.Combine(AppContext.BaseDirectory, "agent-public.pem");
+    public static string PublicKeyPath => Path.Combine(SharedFolder, "challenge-public.pem");
+    public static string LegacyPublicKeyPath => Path.Combine(AppContext.BaseDirectory, "agent-public.pem");
 
     public static AgentConfig Load()
     {
@@ -76,9 +96,10 @@ internal sealed class AgentConfig
     /// <summary>โหลด public key ของ Master ถ้าไม่มีไฟล์จะคืน null และจะไม่มีใครเชื่อมต่อได้</summary>
     public static ECDsa? LoadPublicKey()
     {
-        if (!File.Exists(PublicKeyPath)) return null;
+        string path = File.Exists(PublicKeyPath) ? PublicKeyPath : LegacyPublicKeyPath;
+        if (!File.Exists(path)) return null;
         var key = ECDsa.Create();
-        key.ImportFromPem(File.ReadAllText(PublicKeyPath));
+        key.ImportFromPem(File.ReadAllText(path));
         return key;
     }
 
@@ -137,6 +158,61 @@ internal sealed class AgentConfig
         {
             error = ex.Message;
             Diag.Error("AgentConfig.WriteInitial", $"เขียนค่าตั้งต้นที่ '{folder}' ไม่สำเร็จ", ex);
+            return false;
+        }
+    }
+
+    /// <summary>C2a enrollment: validate the password-protected bundle before writing any endpoint secret.</summary>
+    public static bool Enroll(string folder, string bundlePath, string bundlePassword, string adminPassword,
+        int port, string hubAddress, out string error)
+    {
+        error = "";
+        if (!PasswordHashing.IsAcceptable(adminPassword)) { error = "admin password rejected"; return false; }
+        try
+        {
+            var (manifest, pfx) = EnrollmentFile.Decode(File.ReadAllBytes(bundlePath));
+            var (agent, ca) = RepoCertificates.ReadEnrollment(pfx, bundlePassword);
+            using (agent) using (ca)
+            {
+                if (!agent.Subject.EndsWith(manifest.MachineId, StringComparison.Ordinal))
+                    throw new InvalidDataException("Bundle machine identity mismatch");
+                using var challenge = ECDsa.Create();
+                challenge.ImportFromPem(manifest.ChallengePublicKeyPem);
+                if (Protocol.Fingerprint(challenge) != manifest.ChallengeFingerprint)
+                    throw new InvalidDataException("Bundle challenge fingerprint mismatch");
+                var policy = new ControlTlsPolicy(ca, new RevocationState(), ControlRole.AgentServer);
+                if (!policy.Validate(agent, null, System.Net.Security.SslPolicyErrors.None, out string reason))
+                    throw new InvalidDataException("Bundle certificate rejected: " + reason);
+
+                Directory.CreateDirectory(folder);
+                string privateDir = Path.Combine(folder, "private");
+                Directory.CreateDirectory(privateDir);
+                Directory.CreateDirectory(Path.Combine(privateDir, "audit"));
+                HardenFolder(folder, usersRead: true);
+                HardenFolder(privateDir, usersRead: false);
+                HardenFolder(Path.Combine(privateDir, "audit"), usersRead: false);
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                File.WriteAllText(Path.Combine(folder, "agent.json"), JsonSerializer.Serialize(new AgentConfig { Port = port, HubAddress = hubAddress }, options));
+                File.WriteAllText(Path.Combine(folder, "challenge-public.pem"), manifest.ChallengePublicKeyPem);
+                byte[] salt = PasswordHashing.NewSalt();
+                File.WriteAllText(Path.Combine(privateDir, "credentials.json"), JsonSerializer.Serialize(new StoredCredentials
+                {
+                    PasswordSalt = Convert.ToBase64String(salt), PasswordHash = Convert.ToBase64String(PasswordHashing.Hash(adminPassword, salt)),
+                }, options));
+                File.WriteAllBytes(Path.Combine(privateDir, "agent-cert.der"), agent.RawData);
+                File.WriteAllBytes(Path.Combine(privateDir, "agent-key.pkcs8"), agent.GetECDsaPrivateKey()!.ExportPkcs8PrivateKey());
+                File.WriteAllBytes(Path.Combine(privateDir, "ca-cert.der"), ca.RawData);
+                if (!File.Exists(Path.Combine(privateDir, "revocation.json")))
+                    File.WriteAllText(Path.Combine(privateDir, "revocation.json"), JsonSerializer.Serialize(new RevocationList(1, new List<string>())));
+                if (!File.Exists(Path.Combine(privateDir, "run-allowlist.json")))
+                    File.WriteAllText(Path.Combine(privateDir, "run-allowlist.json"), JsonSerializer.Serialize(new RunAllowlist(new List<string>()), options));
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.GetType().Name + ": " + ex.Message;
+            Diag.Error("AgentConfig.Enroll", "enrollment failed; no partial identity was activated");
             return false;
         }
     }
@@ -215,7 +291,7 @@ internal sealed class CommunitySettings
 /// ตัวแอปหลักของ Agent: ไม่มีหน้าต่าง มีแค่ไอคอนใน System Tray
 /// งานที่ต้องแตะ UI (ล็อกจอ, กล่องข้อความ) ถูกส่งกลับมาทำบน UI thread ผ่าน RunOnUi
 /// </summary>
-internal sealed class AgentContext : ApplicationContext
+internal sealed class AgentContext : ApplicationContext, IAgentHandler
 {
     private readonly Control _ui;
     private readonly NotifyIcon _tray;
@@ -226,6 +302,7 @@ internal sealed class AgentContext : ApplicationContext
     private readonly ActivityTracker _activity = new();
     private readonly BlockEnforcer _block = new();
     private readonly AgentConfig _config;
+    private readonly AgentSecurity? _security;
     private readonly string? _communityFingerprint;
     private readonly string _myName = $"{Environment.UserName} @ {Environment.MachineName}";
 
@@ -248,6 +325,7 @@ internal sealed class AgentContext : ApplicationContext
         menu.Items.Add("แชทกับผู้ดูแลระบบ", null, (_, _) => OpenChat());
         menu.Items.Add("เปิดห้องชุมชน (แชท/คอลเสียง)", null, (_, _) => OpenCommunity());
         menu.Items.Add("สถานะการเชื่อมต่อ...", null, (_, _) => ShowStatus());
+        menu.Items.Add("ตรวจสอบความถูกต้องของ audit", null, (_, _) => VerifyAudit());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("ออกจากโปรแกรม (ต้องใช้รหัสผู้ดูแล)", null, (_, _) => RequestExit());
         _tray.ContextMenuStrip = menu;
@@ -257,17 +335,26 @@ internal sealed class AgentContext : ApplicationContext
         if (publicKey is null)
         {
             _tray.ShowBalloonTip(10000, "Rain Drop Agent",
-                "ไม่พบไฟล์ agent-public.pem จึงยังไม่มี Master ใดเชื่อมต่อได้", ToolTipIcon.Warning);
+                "ไม่พบกุญแจ challenge ของ Master จึงยังยืนยันตัวตนชั้นที่สองไม่ได้", ToolTipIcon.Warning);
         }
         _communityFingerprint = publicKey is null ? null : Protocol.Fingerprint(publicKey);
 
-        _server = new AgentServer(config.Port, publicKey, this);
+        _security = AgentSecurity.LoadFromService(out string? identityError);
+        if (_security is null) ReportError("ยังไม่มี Agent identity: " + (identityError ?? "ติดตั้ง enrollment bundle ก่อน"));
+        _server = new AgentServer(config.Port, publicKey, this, _security);
 
         // ส่งแจ้งเตือน (USB/ไฟล์/บล็อกโปรแกรม) ไปยัง Master ที่เชื่อมต่ออยู่
         _activity.Alert += a => _server.BroadcastAlert(a);
         _block.Alert += a => _server.BroadcastAlert(a);
 
         Task.Run(_server.RunAsync);
+    }
+
+    private void VerifyAudit()
+    {
+        var result = ServiceClient.VerifyAudit(out string? error);
+        MessageBox.Show(result is null ? (error ?? "ติดต่อ Service ไม่ได้") : result.Ok ? "audit chain ถูกต้อง" : "audit chain ไม่ถูกต้อง: " + result.AuditError,
+            "Rain Drop Audit", MessageBoxButtons.OK, result is { Ok: true } ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
     }
 
     public void ReportError(string message) => RunOnUi(() =>
@@ -290,7 +377,7 @@ internal sealed class AgentContext : ApplicationContext
         }
         if (_communityFingerprint is null)
         {
-            MessageBox.Show("ยังไม่ได้ติดตั้งกุญแจของชุมชน (agent-public.pem) จึงเข้าห้องชุมชนไม่ได้",
+            MessageBox.Show("ยังไม่ได้ติดตั้งกุญแจของชุมชน จึงเข้าห้องชุมชนไม่ได้",
                 "Rain Drop", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
@@ -445,6 +532,7 @@ internal sealed class AgentContext : ApplicationContext
         if (disposing)
         {
             _server.Stop();
+            _security?.Dispose();
             _activity.Dispose();
             _block.Dispose();
             _chat?.ForceClose();

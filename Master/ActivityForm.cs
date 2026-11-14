@@ -12,6 +12,7 @@ internal sealed class ActivityForm : Form
     private readonly HostEntry _host;
     private readonly MasterSettings _settings;
     private readonly MasterKey _key;
+    private readonly MasterPki _pki;
     private readonly CancellationTokenSource _cts = new();
     private AgentClient? _client;
 
@@ -35,11 +36,12 @@ internal sealed class ActivityForm : Form
         return bold;
     }
 
-    public ActivityForm(HostEntry host, MasterSettings settings, MasterKey key)
+    public ActivityForm(HostEntry host, MasterSettings settings, MasterKey key, MasterPki pki)
     {
         _host = host;
         _settings = settings;
         _key = key;
+        _pki = pki;
 
         Text = $"กิจกรรม - {host.Name} ({host.Address})";
         Icon = AppIcon.Load();
@@ -146,7 +148,7 @@ internal sealed class ActivityForm : Form
                     _client?.Dispose();
                     _active.Text = "กำลังเชื่อมต่อ...";
                     var (host, port) = _host.Resolve(_settings.Port);
-                    _client = await AgentClient.ConnectAsync(host, port, _key, token);
+                    _client = await AgentClient.ConnectAsync(host, port, _key, _pki, _host.Name, token);
                 }
 
                 var snap = await _client.RequestActivityAsync(token);

@@ -3,16 +3,20 @@
   ติดตั้ง Rain Drop Agent บนเครื่องลูกด้วยสคริปต์ (ทางเลือกแทนตัวติดตั้งสำเร็จรูป)
   ติดตั้งเป็น Windows Service ที่เปิด Agent ทุกครั้งที่บูต และปลุกกลับถ้าถูกปิด
   ตัวอย่าง:
-    .\install-agent.ps1 -PublicKey .\master-public.pem -Password MyStrongPass123
-    .\install-agent.ps1 -PublicKey \\server\share\master-public.pem -Password MyStrongPass123 -Port 11400
+    .\install-agent.ps1 -Bundle .\PC-01.rdrop -BundlePassword MyBundlePass12 -Password MyStrongPass123
+    .\install-agent.ps1 -Bundle \\server\share\PC-01.rdrop -BundlePassword MyBundlePass12 -Password MyStrongPass123 -Port 11400
 #>
 param(
-    [Parameter(Mandatory = $true)][string]$PublicKey,
+    [Parameter(Mandatory = $true)][string]$Bundle,
+    [Parameter(Mandatory = $true)][string]$BundlePassword,
     [string]$Source = "$PSScriptRoot\publish",
     [int]$Port = 11400,
     [Parameter(Mandatory = $true)][string]$Password,
     [string]$Hub = ''
 )
+
+if ($BundlePassword.Length -lt 12) { throw 'รหัส bundle ต้องยาวอย่างน้อย 12 ตัวอักษร' }
+if (-not (Test-Path $Bundle)) { throw "ไม่พบไฟล์ enrollment: $Bundle" }
 
 # บังคับรหัสผ่านอย่างน้อย 8 ตัวอักษร ไม่มีค่าเริ่มต้น 'raindrop' อีกต่อไป (เฟส C1)
 if ($Password.Length -lt 8) {
@@ -33,15 +37,11 @@ Copy-Item -Path (Join-Path $Source 'Agent\*')        -Destination $dest -Recurse
 Copy-Item -Path (Join-Path $Source 'AgentService\*') -Destination $dest -Recurse -Force
 if (Test-Path "$PSScriptRoot\diagnose-agent.ps1") { Copy-Item "$PSScriptRoot\diagnose-agent.ps1" $dest -Force }
 
-# กุญแจสาธารณะของ Master
-Copy-Item -Path $PublicKey -Destination (Join-Path $dest 'agent-public.pem') -Force
-
-# ตั้งค่า + รหัสผ่าน (PBKDF2 hash) สำหรับการออกจากโปรแกรม
-# ค่าตั้งเก็บที่ %ProgramData%\RainDrop ซึ่งตั้ง ACL ให้ผู้ใช้ทั่วไปเขียนไม่ได้
-# agent.json ไม่มีรหัสผ่าน, hash อยู่ใน private\credentials.json ที่ Users อ่านไม่ได้
+# ลงทะเบียนด้วย enrollment bundle เฉพาะเครื่อง (PKCS#12 มีรหัส)
+# identity/allowlist/revocation/audit อยู่ใน private\ ซึ่ง Users อ่าน/เขียนไม่ได้
 $configDir = Join-Path $env:ProgramData 'RainDrop'
-& (Join-Path $dest 'RainDrop.Agent.exe') --init-config "$configDir" "$Password" $Port "$Hub" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "ตั้งรหัสผ่านไม่สำเร็จ (exit $LASTEXITCODE) ตรวจว่ารหัสผ่านยาว >= 8 และไม่มีอักขระควบคุม" }
+& (Join-Path $dest 'RainDrop.Agent.exe') --enroll "$configDir" "$Bundle" "$BundlePassword" "$Password" $Port "$Hub" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "enroll ไม่สำเร็จ (exit $LASTEXITCODE) ตรวจไฟล์ bundle และรหัสทั้งสองชุด" }
 
 # ย้ำ ACL ด้วย SID มาตรฐาน (ไม่ขึ้นกับภาษา Windows): SYSTEM/Admins เต็มสิทธิ์, Users อ่านได้อย่างเดียว
 & icacls.exe "$configDir" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null

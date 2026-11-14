@@ -2,37 +2,54 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using RainDrop.Shared;
 
 namespace RainDrop.Agent;
 
+internal interface IAgentHandler
+{
+    void ReportError(string message);
+    void Lock(string text);
+    void Unlock();
+    void ShowMessage(string title, string text);
+    ActivitySnapshot GetActivity();
+    void SetBlocklist(BlockRules rules);
+    void ReceiveChat(ChatMsg msg);
+    void ReceiveVoice(VoiceMsg msg);
+}
+
 /// <summary>
-/// TCP server ที่รอให้ Master เชื่อมต่อเข้ามา
-/// แต่ละการเชื่อมต่อ: ยืนยันตัวตน -> วนรับคำสั่ง
+/// TCP control server: mutual TLS first, then the unchanged C1 ECDSA challenge/response,
+/// then a versioned revocation snapshot. No plaintext path exists.
 /// </summary>
 internal sealed class AgentServer
 {
     private readonly int _port;
     private readonly ECDsa? _publicKey;
     private readonly object _keyLock = new();
-    private readonly AgentContext _ctx;
+    private readonly IAgentHandler _ctx;
+    private readonly AgentSecurity? _security;
+    private readonly ConnectionRateLimiter _limiter;
+    private readonly bool _discovery;
     private readonly CancellationTokenSource _cts = new();
     private TcpListener? _listener;
 
-    /// <summary>การเชื่อมต่อที่ยืนยันตัวตนแล้ว ใช้สำหรับส่งข้อความแชทกลับไปหา Master</summary>
     private readonly ConcurrentDictionary<Session, byte> _sessions = new();
 
-    /// <summary>หนึ่งการเชื่อมต่อ: ล็อกการเขียนไว้ เพราะแชทอาจถูกส่งจาก UI thread พร้อมกับการตอบภาพหน้าจอ</summary>
     private sealed class Session
     {
         private readonly SemaphoreSlim _writeLock = new(1, 1);
-        public NetworkStream Stream { get; }
+        public Stream Stream { get; }
         public string Remote { get; }
-        public Session(NetworkStream stream, string remote)
+        public string Serial { get; }
+        public Session(Stream stream, string remote, string serial)
         {
             Stream = stream;
             Remote = remote;
+            Serial = serial;
         }
 
         public async Task SendAsync(MsgType type, byte[] payload)
@@ -44,24 +61,15 @@ internal sealed class AgentServer
     }
 
     public bool HasMaster => !_sessions.IsEmpty;
-
-    /// <summary>รายการ IP ของ Master ที่เชื่อมต่ออยู่ (ไม่ซ้ำ)</summary>
-    public IReadOnlyList<string> ConnectedMasters =>
-        _sessions.Keys.Select(s => s.Remote).Distinct().ToList();
-
-    /// <summary>ถ้าเปิดพอร์ตไม่สำเร็จจะมีข้อความ error อยู่ที่นี่</summary>
+    public IReadOnlyList<string> ConnectedMasters => _sessions.Keys.Select(s => s.Remote).Distinct().ToList();
     public string? StartError { get; private set; }
-
     public int Port => _port;
+    public int ListeningPort => (_listener?.LocalEndpoint as IPEndPoint)?.Port ?? _port;
     public bool HasPublicKey => _publicKey is not null;
     public string? KeyFingerprint => _publicKey is null ? null : Protocol.Fingerprint(_publicKey);
 
-    /// <summary>ส่งแชท/ข้อความเสียงไปยัง Master ทุกตัวที่เชื่อมต่ออยู่ คืนค่าจำนวนการเชื่อมต่อที่ส่งออกไป</summary>
     public int BroadcastChat(ChatMsg msg) => Broadcast(MsgType.ChatMessage, Protocol.ToJson(msg));
-
     public int BroadcastVoice(VoiceMsg msg) => Broadcast(MsgType.VoiceMessage, Protocol.ToJson(msg));
-
-    /// <summary>ส่งแจ้งเตือน (เสียบ USB, ส่งออกไฟล์, บล็อกโปรแกรม) ไปยัง Master ทุกตัวที่เชื่อมต่ออยู่</summary>
     public int BroadcastAlert(AlertMsg msg) => Broadcast(MsgType.Alert, Protocol.ToJson(msg));
 
     private int Broadcast(MsgType type, byte[] payload)
@@ -73,25 +81,35 @@ internal sealed class AgentServer
             _ = Task.Run(async () =>
             {
                 try { await session.SendAsync(type, payload); }
-                catch
+                catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
                 {
-                    // จงใจเพิกเฉย: ส่งให้ Master ตัวนี้ไม่ได้เพราะสายหลุด
-                    // ลูปอ่านของ session นั้นจะจบและถอดออกจาก _sessions เอง จึงไม่ต้องจัดการซ้ำที่นี่
+                    // จงใจไม่ส่งซ้ำ: สายหลุด ลูปอ่านจะถอด session เอง; บันทึกเหตุผลไว้ตรวจสอบ
+                    Diag.Warn("AgentServer.Broadcast", "ส่งข้อความไป Master ไม่สำเร็จเพราะการเชื่อมต่อปิดแล้ว", ex);
                 }
             });
         }
         return count;
     }
 
-    public AgentServer(int port, ECDsa? publicKey, AgentContext ctx)
+    public AgentServer(int port, ECDsa? publicKey, IAgentHandler ctx, AgentSecurity? security,
+        ConnectionRateLimiter? limiter = null, bool discovery = true)
     {
         _port = port;
         _publicKey = publicKey;
         _ctx = ctx;
+        _security = security;
+        _limiter = limiter ?? new ConnectionRateLimiter();
+        _discovery = discovery;
     }
 
     public async Task RunAsync()
     {
+        if (_security is null)
+        {
+            StartError = "ยังไม่มี Agent identity จาก Service จึงไม่เปิดรับการเชื่อมต่อแบบ plaintext";
+            _ctx.ReportError(StartError);
+            return;
+        }
         try
         {
             _listener = new TcpListener(IPAddress.Any, _port);
@@ -99,28 +117,31 @@ internal sealed class AgentServer
         }
         catch (Exception ex)
         {
-            // ส่วนใหญ่เกิดจากมีโปรแกรมอื่นใช้พอร์ตนี้อยู่แล้ว (หรือมี Agent อีกตัวทำงานใน session อื่น)
             StartError = $"เปิดพอร์ต {_port} ไม่ได้: {ex.Message}";
             _ctx.ReportError(StartError);
             return;
         }
 
-        // ตอบการค้นหาอัตโนมัติจาก Master (เฉพาะ Master ที่ใช้กุญแจชุดเดียวกัน)
-        if (KeyFingerprint is { } fingerprint)
+        if (_discovery && KeyFingerprint is { } fingerprint)
             _ = Task.Run(() => Discovery.RespondAsync(_port, fingerprint, _port, _ctx.ReportError, _cts.Token));
 
         while (!_cts.IsCancellationRequested)
         {
             TcpClient client;
-            try
+            try { client = await _listener.AcceptTcpClientAsync(_cts.Token); }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException)
             {
-                client = await _listener.AcceptTcpClientAsync(_cts.Token);
-            }
-            catch
-            {
+                if (!_cts.IsCancellationRequested) Diag.Warn("AgentServer.Accept", " listener stopped unexpectedly", ex);
                 break;
             }
-            _ = Task.Run(() => HandleClientAsync(client));
+            var ip = (client.Client.RemoteEndPoint as IPEndPoint)?.Address ?? IPAddress.None;
+            if (!_limiter.TryConnect(ip))
+            {
+                client.Dispose();
+                _security.Audit(new AuditEvent("rate-limit", ip.ToString(), "denied", "connection-limit"));
+                continue;
+            }
+            _ = Task.Run(() => HandleClientAsync(client, ip));
         }
     }
 
@@ -128,65 +149,117 @@ internal sealed class AgentServer
     {
         _cts.Cancel();
         _listener?.Stop();
+        foreach (var session in _sessions.Keys) session.Stream.Dispose();
     }
 
-    private async Task HandleClientAsync(TcpClient client)
+    private async Task HandleClientAsync(TcpClient client, IPAddress ip)
     {
         using (client)
         {
             client.NoDelay = true;
-            var stream = client.GetStream();
+            Stream? tls = null;
             try
             {
-                if (!await AuthenticateAsync(stream)) return;
+                var policy = new ControlTlsPolicy(_security!.Ca, _security.Revocation, ControlRole.MasterClient);
+                using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                handshakeCts.CancelAfter(ControlTls.HandshakeTimeout);
+                try
+                {
+                    tls = await ControlTls.AuthenticateServerAsync(client.GetStream(), _security.Certificate, policy, handshakeCts.Token);
+                }
+                catch (ControlTlsException ex)
+                {
+                    _limiter.RecordFailure(ip);
+                    string detail = (ex.Reason + ":" + (ex.InnerException?.Message ?? "")).Replace("\r", " ").Replace("\n", " ");
+                    if (detail.Length > 128) detail = detail[..128];
+                    _security.Audit(new AuditEvent("tls-fail", ip.ToString(), "denied", detail));
+                    return;
+                }
 
-                var session = new Session(stream,
-                    (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "?");
+                if (!await AuthenticateAsync(tls))
+                {
+                    _limiter.RecordFailure(ip);
+                    _security.Audit(new AuditEvent("auth-fail", ip.ToString(), "denied", "challenge"));
+                    return;
+                }
+
+                using var revocationTimeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                revocationTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+                var (type, payload) = await Protocol.ReadAsync(tls, revocationTimeout.Token);
+                if (type != ControlMessages.RevocationList) throw new InvalidDataException("Expected revocation snapshot");
+                var incoming = Protocol.FromJson<RevocationList>(payload);
+                if (!_security.ApplyRevocation(incoming)) throw new IOException("Revocation persistence failed");
+                await Protocol.WriteAsync(tls, ControlMessages.RevocationAck, Array.Empty<byte>(), revocationTimeout.Token);
+
+                var ssl = (System.Net.Security.SslStream)tls;
+                using var remoteCert = new X509Certificate2(ssl.RemoteCertificate!);
+                var session = new Session(tls, ip.ToString(), RepoCertificates.Serial(remoteCert));
+                if (!_security.Audit(new AuditEvent("connect", ip.ToString(), "ok", session.Serial)))
+                    return; // audit failure is fail-closed
                 _sessions.TryAdd(session, 0);
                 try
                 {
                     while (!_cts.IsCancellationRequested)
                     {
-                        var (type, payload) = await Protocol.ReadAsync(stream, _cts.Token);
-                        await HandlePacketAsync(session, type, payload);
+                        var (packetType, packetPayload) = await Protocol.ReadAsync(tls, _cts.Token);
+                        await HandlePacketAsync(session, packetType, packetPayload);
                     }
                 }
                 finally
                 {
                     _sessions.TryRemove(session, out _);
+                    _security.Audit(new AuditEvent("disconnect", ip.ToString(), "ok", session.Serial));
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or AuthenticationException or InvalidDataException or OperationCanceledException or ObjectDisposedException or System.Text.Json.JsonException)
             {
-                // Master ตัดการเชื่อมต่อหรือข้อมูลผิดรูปแบบ: ปิด connection นี้ไป
+                // การเชื่อมต่อขาด/ข้อมูลผิดรูปแบบ: ปิดสายนี้ ไม่ fallback เป็น plaintext
+                if (!_cts.IsCancellationRequested)
+                    Diag.Warn("AgentServer.HandleClient", "control connection closed: " + ex.GetType().Name);
+            }
+            finally
+            {
+                tls?.Dispose();
             }
         }
     }
 
-    private async Task<bool> AuthenticateAsync(NetworkStream stream)
+    /// <summary>C1 challenge/response, byte-for-byte unchanged, now carried inside TLS.</summary>
+    private async Task<bool> AuthenticateAsync(Stream stream)
     {
         var nonce = RandomNumberGenerator.GetBytes(32);
         await Protocol.WriteAsync(stream, MsgType.AuthChallenge, nonce);
-
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var (type, signature) = await Protocol.ReadAsync(stream, timeout.Token);
-
         bool ok = false;
         if (type == MsgType.AuthResponse && _publicKey is not null)
         {
-            lock (_keyLock)
-                ok = Protocol.Verify(_publicKey, nonce, signature);
+            lock (_keyLock) ok = Protocol.Verify(_publicKey, nonce, signature);
         }
-
         await Protocol.WriteAsync(stream, MsgType.AuthResult, new[] { (byte)(ok ? 1 : 0) });
-        if (!ok) await Task.Delay(1000); // หน่วงเวลาเพื่อชะลอการเดาสุ่ม
+        if (!ok) await Task.Delay(1000);
         return ok;
+    }
+
+    private bool AuditCommand(Session session, string eventName, string result, string detail = "")
+    {
+        if (_security!.Audit(new AuditEvent(eventName, session.Remote, result, detail))) return true;
+        session.Stream.Dispose(); // fail closed when the protected audit chain cannot be appended
+        return false;
     }
 
     private async Task HandlePacketAsync(Session session, MsgType type, byte[] payload)
     {
         switch (type)
         {
+            case ControlMessages.RevocationList:
+            {
+                var incoming = Protocol.FromJson<RevocationList>(payload);
+                bool saved = _security!.ApplyRevocation(incoming);
+                if (!AuditCommand(session, "revoke", saved ? "ok" : "denied", "snapshot")) return;
+                await session.SendAsync(ControlMessages.RevocationAck, Array.Empty<byte>());
+                break;
+            }
             case MsgType.ScreenRequest:
             {
                 var req = Protocol.FromJson<ScreenRequest>(payload);
@@ -197,19 +270,17 @@ internal sealed class AgentServer
             case MsgType.MouseEvent:
                 InputSimulator.Mouse(Protocol.FromJson<MouseCmd>(payload));
                 break;
-
             case MsgType.KeyEvent:
                 InputSimulator.Key(Protocol.FromJson<KeyCmd>(payload));
                 break;
-
             case MsgType.Lock:
+                if (!AuditCommand(session, "lock", "ok")) return;
                 _ctx.Lock(Protocol.FromJson<LockCmd>(payload).Text);
                 break;
-
             case MsgType.Unlock:
+                if (!AuditCommand(session, "unlock", "ok")) return;
                 _ctx.Unlock();
                 break;
-
             case MsgType.ShowMessage:
             {
                 var msg = Protocol.FromJson<MessageCmd>(payload);
@@ -217,39 +288,39 @@ internal sealed class AgentServer
                 break;
             }
             case MsgType.PowerAction:
-                PowerActions.Execute(Protocol.FromJson<PowerCmd>(payload).Action);
+            {
+                var action = Protocol.FromJson<PowerCmd>(payload).Action;
+                if (!AuditCommand(session, "power", "ok", action.ToString())) return;
+                PowerActions.Execute(action);
                 break;
-
+            }
             case MsgType.ChatMessage:
                 _ctx.ReceiveChat(Protocol.FromJson<ChatMsg>(payload));
                 break;
-
             case MsgType.VoiceMessage:
                 _ctx.ReceiveVoice(Protocol.FromJson<VoiceMsg>(payload));
                 break;
-
             case MsgType.ActivityRequest:
                 await session.SendAsync(MsgType.ActivitySnapshot, Protocol.ToJson(_ctx.GetActivity()));
                 break;
-
             case MsgType.SetBlocklist:
-                _ctx.SetBlocklist(Protocol.FromJson<BlockRules>(payload));
+            {
+                var rules = Protocol.FromJson<BlockRules>(payload);
+                if (!AuditCommand(session, "blocklist", "ok", $"{rules.Programs.Count}/{rules.Urls.Count}")) return;
+                _ctx.SetBlocklist(rules);
                 break;
-
+            }
             case MsgType.RunCommand:
             {
                 var run = Protocol.FromJson<RunCmd>(payload);
-                try
-                {
-                    Process.Start(new ProcessStartInfo(run.Target, run.Arguments ?? string.Empty)
-                    {
-                        UseShellExecute = true, // ทำให้เปิด URL ด้วยเบราว์เซอร์เริ่มต้นได้
-                    });
-                }
+                var decision = RunCommandPolicy.Evaluate(run, _security!.Allowlist);
+                if (!AuditCommand(session, "run", decision.Allowed ? "ok" : "denied", decision.Reason)) return;
+                if (!decision.Allowed || decision.StartInfo is null) return;
+                try { Process.Start(decision.StartInfo)?.Dispose(); }
                 catch (Exception ex)
                 {
-                    // Master สั่งเปิดโปรแกรม/URL แล้วเปิดไม่ได้ ผู้ดูแลควรทราบว่าคำสั่งไม่สำเร็จ
-                    Diag.Warn("AgentServer.RunCommand", $"เปิด '{run.Target}' ไม่สำเร็จ", ex);
+                    // ไม่บันทึก target/arguments เพราะอาจเป็นความลับ; บันทึกเฉพาะชนิด error
+                    Diag.Warn("AgentServer.RunCommand", "allowlisted launch failed: " + ex.GetType().Name);
                 }
                 break;
             }
@@ -268,6 +339,6 @@ internal static class PowerActions
             PowerAction.Logoff => "/l",
             _ => throw new ArgumentOutOfRangeException(nameof(action)),
         };
-        Process.Start(new ProcessStartInfo("shutdown", args) { CreateNoWindow = true, UseShellExecute = false });
+        using var process = Process.Start(new ProcessStartInfo("shutdown", args) { CreateNoWindow = true, UseShellExecute = false });
     }
 }

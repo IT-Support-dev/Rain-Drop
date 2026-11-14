@@ -1,4 +1,7 @@
 using System.Net.Sockets;
+using System.Net.Security;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Channels;
 using RainDrop.Shared;
 
@@ -15,7 +18,9 @@ namespace RainDrop.Master;
 internal sealed class AgentClient : IDisposable
 {
     private readonly TcpClient _tcp;
-    private readonly NetworkStream _stream;
+    private readonly SslStream _stream;
+    private readonly MasterPki _pki;
+    private readonly string _remote;
     private readonly Channel<(MsgType Type, byte[] Payload)> _outbox =
         Channel.CreateUnbounded<(MsgType, byte[])>(new UnboundedChannelOptions { SingleReader = true });
     private readonly SemaphoreSlim _screenLock = new(1, 1);
@@ -33,16 +38,18 @@ internal sealed class AgentClient : IDisposable
     /// <summary>แจ้งเตือนจากเครื่องลูก (USB/ไฟล์/บล็อกโปรแกรม) ถูกเรียกบน thread pool</summary>
     public event Action<AlertMsg>? AlertReceived;
 
-    private AgentClient(TcpClient tcp)
+    private AgentClient(TcpClient tcp, SslStream stream, MasterPki pki, string remote)
     {
         _tcp = tcp;
-        _stream = tcp.GetStream();
+        _stream = stream;
+        _pki = pki;
+        _remote = remote;
         IsConnected = true;
         _ = Task.Run(WriterLoopAsync);
         _ = Task.Run(ReaderLoopAsync);
     }
 
-    public static async Task<AgentClient> ConnectAsync(string host, int port, MasterKey key, CancellationToken ct = default)
+    public static async Task<AgentClient> ConnectAsync(string host, int port, MasterKey key, MasterPki pki, string machineName, CancellationToken ct = default)
     {
         var tcp = new TcpClient { NoDelay = true };
         try
@@ -51,7 +58,27 @@ internal sealed class AgentClient : IDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(5));
 
             await tcp.ConnectAsync(host, port, cts.Token).ConfigureAwait(false);
-            var stream = tcp.GetStream();
+            string remote = (tcp.Client.RemoteEndPoint as System.Net.IPEndPoint)?.Address.ToString() ?? host;
+            string? expected = pki.ExpectedSerial(machineName);
+            if (expected is null) throw new UnauthorizedAccessException("เครื่องนี้ยังไม่มี enrollment bundle ใน Master");
+            var policy = new ControlTlsPolicy(pki.CaCertificate, new RevocationState(pki.RevocationSnapshot()), ControlRole.AgentServer);
+            SslStream stream;
+            try
+            {
+                stream = await ControlTls.AuthenticateClientAsync(tcp.GetStream(), host, pki.ClientCertificate, policy, cts.Token).ConfigureAwait(false);
+            }
+            catch (ControlTlsException ex)
+            {
+                pki.Audit.Append(new AuditEvent("tls-fail", remote, "denied", ex.Reason));
+                throw new IOException("TLS ปฏิเสธการเชื่อมต่อ: " + ex.Reason);
+            }
+            using var remoteCert = new X509Certificate2(stream.RemoteCertificate!);
+            if (!string.Equals(RepoCertificates.Serial(remoteCert), expected, StringComparison.OrdinalIgnoreCase))
+            {
+                stream.Dispose();
+                pki.Audit.Append(new AuditEvent("auth-fail", remote, "denied", "agent-identity-mismatch"));
+                throw new UnauthorizedAccessException("ใบรับรองไม่ตรงกับเครื่องที่ลงทะเบียนไว้");
+            }
 
             var (type, nonce) = await Protocol.ReadAsync(stream, cts.Token).ConfigureAwait(false);
             if (type != MsgType.AuthChallenge || nonce.Length != 32)
@@ -61,10 +88,17 @@ internal sealed class AgentClient : IDisposable
 
             var (resultType, result) = await Protocol.ReadAsync(stream, cts.Token).ConfigureAwait(false);
             if (resultType != MsgType.AuthResult || result.Length != 1 || result[0] != 1)
+            {
+                pki.Audit.Append(new AuditEvent("auth-fail", remote, "denied", "challenge"));
                 throw new UnauthorizedAccessException(
-                    $"กุญแจไม่ตรงกัน: ติดตั้งเครื่องลูกใหม่ด้วย Agent Setup ที่ build ชุดเดียวกับ Master (ลายนิ้วมือ Master: {key.Fingerprint})");
+                    $"กุญแจไม่ตรงกัน: ติดตั้งเครื่องลูกใหม่ด้วย enrollment bundle ของ Master นี้ (ลายนิ้วมือ Master: {key.Fingerprint})");
+            }
 
-            return new AgentClient(tcp);
+            await Protocol.WriteAsync(stream, ControlMessages.RevocationList, Protocol.ToJson(pki.RevocationSnapshot()), cts.Token).ConfigureAwait(false);
+            var (ackType, _) = await Protocol.ReadAsync(stream, cts.Token).ConfigureAwait(false);
+            if (ackType != ControlMessages.RevocationAck) throw new InvalidDataException("Agent did not acknowledge revocation snapshot");
+            pki.Audit.Append(new AuditEvent("connect", remote, "ok", expected));
+            return new AgentClient(tcp, stream, pki, remote);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -197,7 +231,23 @@ internal sealed class AgentClient : IDisposable
 
     public void Send(MsgType type, byte[]? payload = null)
     {
-        if (IsConnected) _outbox.Writer.TryWrite((type, payload ?? Array.Empty<byte>()));
+        if (!IsConnected) return;
+        string? eventName = type switch
+        {
+            MsgType.Lock => "lock", MsgType.Unlock => "unlock", MsgType.PowerAction => "power",
+            MsgType.RunCommand => "run", MsgType.SetBlocklist => "blocklist", _ => null,
+        };
+        if (eventName is not null)
+        {
+            try { _pki.Audit.Append(new AuditEvent(eventName, _remote, "sent")); }
+            catch (IOException ex)
+            {
+                Diag.Error("AgentClient.Send", "audit unavailable; command not sent", ex);
+                Dispose();
+                return;
+            }
+        }
+        _outbox.Writer.TryWrite((type, payload ?? Array.Empty<byte>()));
     }
 
     public void SendJson<T>(MsgType type, T obj) => Send(type, Protocol.ToJson(obj));
@@ -243,6 +293,7 @@ internal sealed class AgentClient : IDisposable
         IsConnected = false;
         _cts.Cancel();
         _outbox.Writer.TryComplete();
+        _stream.Dispose();
         _tcp.Dispose();
     }
 }

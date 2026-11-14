@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using RainDrop.Shared;
 
 namespace RainDrop.AgentService;
 
@@ -47,11 +48,19 @@ internal sealed class Worker : BackgroundService
             _log.LogWarning("ไม่พบรหัสผ่านผู้ดูแลใน {Path} จะไม่มีใครสั่งหยุด Agent ได้จนกว่าจะตั้งใหม่",
                 ServiceStore.CredentialsPath);
 
+        AuditLog audit;
+        try { audit = new AuditLog(ServiceStore.AuditFolder); }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Audit chain ใช้ไม่ได้ Agent จะปฏิเสธคำสั่งที่ต้องบันทึก audit");
+            throw;
+        }
+        using var auditScope = audit;
         var pipe = new ControlPipeServer(
             gate, Log,
             onAuthorizedStop: () => Interlocked.Exchange(ref _stopAuthorized, 1),
             agentPid: () => _agentPid,
-            syncHosts: () => HostsBlocker.Sync(Log));
+            syncHosts: () => HostsBlocker.Sync(Log), audit: audit);
 
         // ใช้ CTS แยกที่ผูกกับ stoppingToken แต่ Worker ยกเลิกเองได้ตอนอนุญาตให้หยุด
         // ถ้าใช้ stoppingToken ตรง ๆ ตอน return จะเกิด deadlock: finally รอ pipeTask

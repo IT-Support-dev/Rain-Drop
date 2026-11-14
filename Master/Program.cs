@@ -6,6 +6,37 @@ namespace RainDrop.Master;
 
 internal static class Program
 {
+    private static int ExportEnrollmentCli(string machine, string addresses, string output)
+    {
+        Console.Error.Write("Enrollment password (>=12 chars): ");
+        string password = ReadPassword();
+        try
+        {
+            using var key = MasterKey.LoadOrCreate();
+            using var pki = MasterPki.LoadOrCreate();
+            File.WriteAllBytes(output, pki.ExportEnrollment(machine,
+                addresses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                password, File.ReadAllText(MasterKey.PublicPath)));
+            Console.WriteLine("enrolled: " + output);
+            return 0;
+        }
+        catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+    }
+
+    private static string ReadPassword()
+    {
+        var chars = new List<char>();
+        while (true)
+        {
+            var key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter) break;
+            if (key.Key == ConsoleKey.Backspace) { if (chars.Count > 0) chars.RemoveAt(chars.Count - 1); }
+            else if (!char.IsControl(key.KeyChar)) chars.Add(key.KeyChar);
+        }
+        Console.WriteLine();
+        return new string(chars.ToArray());
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -13,6 +44,25 @@ internal static class Program
         // (เลิก --generate-keys เพราะไม่ควรสร้าง/แจกกุญแจลับตอน build อีกต่อไป)
         if (args.Length == 2 && args[0] == "--export-public-key")
             return MasterKey.ExportPublicKey(args[1]);
+        if (args.Length == 1 && args[0] == "--verify-audit")
+        {
+            var result = AuditLog.Verify(MasterPki.AuditFolder);
+            Console.WriteLine(result.Valid ? $"audit valid ({result.Records} records)" : "audit invalid: " + result.Error);
+            return result.Valid ? 0 : 1;
+        }
+        if (args.Length == 4 && args[0] == "--export-enrollment")
+            return ExportEnrollmentCli(args[1], args[2], args[3]);
+        if (args.Length == 2 && args[0] == "--revoke")
+        {
+            try
+            {
+                using var pki = MasterPki.LoadOrCreate();
+                pki.Revoke(args[1]);
+                Console.WriteLine("revoked: " + args[1]);
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+        }
 
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.EnableVisualStyles();
