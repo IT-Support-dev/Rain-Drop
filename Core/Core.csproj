@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <!-- Password-encrypted PKCS#12 enrollment bundles; no key is installed in a certificate store. -->
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.1" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.2" />
   </ItemGroup>
 
 </Project>
