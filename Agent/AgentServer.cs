@@ -170,7 +170,9 @@ internal sealed class AgentServer
                 catch (ControlTlsException ex)
                 {
                     _limiter.RecordFailure(ip);
-                    _security.Audit(new AuditEvent("tls-fail", ip.ToString(), "denied", ex.Reason));
+                    string detail = (ex.Reason + ":" + (ex.InnerException?.Message ?? "")).Replace("\r", " ").Replace("\n", " ");
+                    if (detail.Length > 128) detail = detail[..128];
+                    _security.Audit(new AuditEvent("tls-fail", ip.ToString(), "denied", detail));
                     return;
                 }
 
