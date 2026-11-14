@@ -34,7 +34,7 @@ internal sealed class RemoteForm : Form
         UiWindowPlacement.Attach(this, "remote-" + host.Name, new Size(1280, 800), new Size(800, 500));
         KeyPreview = true;
 
-        _pic = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
+        _pic = new UiPictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
 
         _controlButton = new ToolStripButton("ดูอย่างเดียว") { CheckOnClick = true, Image = UiIcons.Get(UiIcon.Monitor, Theme.TextSecondary), ToolTipText = "สลับโหมดควบคุมระยะไกล" };
         _controlButton.AccessibleName = "สลับโหมดควบคุม";
@@ -48,8 +48,8 @@ internal sealed class RemoteForm : Form
         toolbar.Items.Add(_controlButton);
         toolbar.Items.Add(new ToolStripSeparator());
         var lockItem = new ToolStripButton("ล็อก", null, (_, _) =>
-            _client?.SendJson(MsgType.Lock, new LockCmd("เครื่องนี้ถูกล็อกโดยผู้ดูแลระบบ"))) { Image = UiIcons.Get(UiIcon.Lock, Theme.TextSecondary), ToolTipText = "ล็อกเครื่องนี้" };
-        var unlockItem = new ToolStripButton("ปลดล็อก", null, (_, _) => _client?.Send(MsgType.Unlock)) { Image = UiIcons.Get(UiIcon.Unlock, Theme.TextSecondary), ToolTipText = "ปลดล็อกเครื่องนี้" };
+            _client?.SendJson(MsgType.Lock, new LockCmd("เครื่องนี้ถูกล็อกโดยผู้ดูแลระบบ"))) { Image = UiIcons.Get(UiIcon.Lock, Theme.TextSecondary), ToolTipText = "ล็อกเครื่องนี้", AccessibleName = "ล็อกเครื่องนี้" };
+        var unlockItem = new ToolStripButton("ปลดล็อก", null, (_, _) => _client?.Send(MsgType.Unlock)) { Image = UiIcons.Get(UiIcon.Unlock, Theme.TextSecondary), ToolTipText = "ปลดล็อกเครื่องนี้", AccessibleName = "ปลดล็อกเครื่องนี้" };
         toolbar.Items.Add(lockItem);
         toolbar.Items.Add(unlockItem);
         toolbar.Items.Add(_statusLabel);
@@ -117,7 +117,8 @@ internal sealed class RemoteForm : Form
                 _statusLabel.Text = "ขาดการเชื่อมต่อ - " + ex.Message;
                 _client?.Dispose();
                 _client = null;
-                try { await Task.Delay(2000, token); } catch { break; }
+                try { await Task.Delay(2000, token); }
+                catch (OperationCanceledException) { break; }
             }
         }
     }

@@ -23,6 +23,7 @@ internal sealed class LockForm : Form
 
     public LockForm(string text)
     {
+        DoubleBuffered = true;
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         Bounds = SystemInformation.VirtualScreen;
@@ -35,14 +36,15 @@ internal sealed class LockForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             BackColor = Theme.Background,
             Padding = new Padding(Theme.Space6),
         };
-        center.RowStyles.Add(new RowStyle(SizeType.Percent, 30));
+        center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        center.RowStyles.Add(new RowStyle(SizeType.Percent, 70));
+        center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
 
         _logo = new PictureBox
         {
@@ -71,9 +73,9 @@ internal sealed class LockForm : Form
             MaximumSize = new Size(SystemInformation.VirtualScreen.Width - Theme.Space6 * 2, 0),
             TextAlign = ContentAlignment.MiddleCenter,
         };
-        center.Controls.Add(_logo, 0, 0);
-        center.Controls.Add(_clock, 0, 1);
-        center.Controls.Add(_label, 0, 2);
+        center.Controls.Add(_logo, 0, 1);
+        center.Controls.Add(_clock, 0, 2);
+        center.Controls.Add(_label, 0, 3);
         Controls.Add(center);
 
         _keepOnTop = new System.Windows.Forms.Timer { Interval = 500 };

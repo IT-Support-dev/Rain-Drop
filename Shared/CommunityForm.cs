@@ -15,9 +15,9 @@ public sealed class CommunityForm : Form
     private readonly VoiceChat _voice;
     private readonly string _myName;
 
-    private readonly ListBox _textList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
-    private readonly ListBox _voiceList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
-    private readonly ListBox _memberList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
+    private readonly ListBox _textList = new UiListBox() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
+    private readonly ListBox _voiceList = new UiListBox() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
+    private readonly ListBox _memberList = new UiListBox() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
     private readonly UiFlowPanel _messages = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Theme.Background, Padding = new Padding(Theme.Space3) };
     private readonly Label _channelTitle = new() { Dock = DockStyle.Top, Height = Theme.ToolbarHeight, Font = Theme.FontTitle, ForeColor = Theme.TextPrimary, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(Theme.Space3, 0, 0, 0), BackColor = Theme.Surface };
     private readonly TextBox _input = UiInput.Create("", multiline: true);
@@ -76,7 +76,7 @@ public sealed class CommunityForm : Form
         left.Controls.Add(_textList, 0, 1);
         left.Controls.Add(Header("ช่องเสียง"), 0, 2);
         left.Controls.Add(_voiceList, 0, 3);
-        var voiceButtons = new Panel { Dock = DockStyle.Fill };
+        var voiceButtons = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
         voiceButtons.Controls.Add(_muteButton);
         voiceButtons.Controls.Add(_voiceButton);
         left.Controls.Add(voiceButtons, 0, 4);
@@ -87,8 +87,8 @@ public sealed class CommunityForm : Form
         var right = new Panel { Dock = DockStyle.Fill };
 
         var inputBar = new Panel { Dock = DockStyle.Bottom, Height = Theme.ButtonHeightLarge * 2, Padding = new Padding(Theme.Space3), BackColor = Theme.Surface };
-        var send = new UiButton("ส่ง", ButtonKind.Primary, UiIcon.Send) { Dock = DockStyle.Right, Width = 88 };
-        var attach = new UiButton("แนบไฟล์", ButtonKind.Secondary, UiIcon.Attach) { Dock = DockStyle.Right, Width = 110 };
+        var send = new UiButton("ส่ง", ButtonKind.Primary, UiIcon.Send) { Dock = DockStyle.Right, Width = Theme.DialogButtonWidth };
+        var attach = new UiButton("แนบไฟล์", ButtonKind.Secondary, UiIcon.Attach) { Dock = DockStyle.Right, Width = Theme.DialogButtonWidth };
         inputBar.Controls.Add(_input);
         inputBar.Controls.Add(attach);
         inputBar.Controls.Add(send);
@@ -254,8 +254,8 @@ public sealed class CommunityForm : Form
             WrapContents = false,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            BackColor = mine ? Theme.Mix(Theme.Accent, Theme.Surface, 0.65) : Theme.SurfaceAlt,
-            Margin = new Padding(mine ? 120 : Theme.Space1, Theme.Space1, mine ? Theme.Space1 : 120, Theme.Space1),
+            BackColor = mine ? Theme.ChatBubbleMine : Theme.ChatBubbleTheirs,
+            Margin = new Padding(mine ? Theme.BubbleIndent : Theme.Space1, Theme.Space1, mine ? Theme.Space1 : Theme.BubbleIndent, Theme.Space1),
             Padding = new Padding(Theme.Space3, Theme.Space2, Theme.Space3, Theme.Space2),
         };
         bubble.Controls.Add(new Label
@@ -267,7 +267,7 @@ public sealed class CommunityForm : Form
             Margin = new Padding(0, 0, 0, Theme.Space1),
         });
         if (!string.IsNullOrEmpty(post.Text))
-            bubble.Controls.Add(new Label { AutoSize = true, Text = post.Text, ForeColor = Theme.TextPrimary, MaximumSize = new Size(420, 0), UseMnemonic = false });
+            bubble.Controls.Add(new Label { AutoSize = true, Text = post.Text, ForeColor = Theme.TextPrimary, MaximumSize = new Size(Theme.ChatTextWidth, 0), UseMnemonic = false });
 
         if (post.Attachment is { } att)
         {
@@ -291,7 +291,7 @@ public sealed class CommunityForm : Form
             {
                 using var img = Image.FromFile(path);
                 var thumb = new Bitmap(img); // คัดลอกเพื่อปล่อยไฟล์
-                var pic = new PictureBox { Image = thumb, SizeMode = PictureBoxSizeMode.Zoom, Size = FitSize(thumb.Size, 260, 200), Cursor = Cursors.Hand };
+                var pic = new PictureBox { Image = thumb, SizeMode = PictureBoxSizeMode.Zoom, Size = FitSize(thumb.Size, Theme.AttachmentMaxWidth, Theme.AttachmentMaxHeight), Cursor = Cursors.Hand };
                 pic.Click += (_, _) => OpenFile(path);
                 return pic;
             }
@@ -302,7 +302,7 @@ public sealed class CommunityForm : Form
             }
         }
 
-        var link = new LinkLabel { AutoSize = true, Text = $"{att.FileName} ({Human(att.Size)})", LinkColor = Theme.AccentHover, ActiveLinkColor = Theme.TextPrimary, VisitedLinkColor = Theme.AccentHover };
+        var link = new LinkLabel { AutoSize = true, Text = $"{att.FileName} ({Human(att.Size)})", LinkColor = Theme.Link, ActiveLinkColor = Theme.TextPrimary, VisitedLinkColor = Theme.Link };
         if (path is not null && File.Exists(path)) link.Click += (_, _) => OpenFile(path);
         else link.Text += "  (กำลังรับ...)";
         link.Tag = att.FileId;
@@ -463,11 +463,21 @@ public sealed class CommunityForm : Form
 
     // ===================== ตัวช่วย =====================
 
+    private static void DisposeOwnedImages(Control c)
+    {
+        if (c is PictureBox pic)
+        {
+            pic.Image?.Dispose();
+            pic.Image = null;
+        }
+        foreach (Control child in c.Controls) DisposeOwnedImages(child);
+    }
+
     private void ClearMessages()
     {
-        foreach (Control c in _messages.Controls)
+        foreach (Control c in _messages.Controls.Cast<Control>().ToList())
         {
-            if (c is PictureBox pic) pic.Image?.Dispose();
+            DisposeOwnedImages(c);
             c.Dispose();
         }
         _messages.Controls.Clear();

@@ -18,9 +18,9 @@ internal sealed class ActivityForm : Form
 
     private readonly Label _active = new();
     private readonly Label _sub = new();
-    private readonly ListView _usage = new();
-    private readonly ListBox _running = new();
-    private readonly ListView _files = new();
+    private readonly ListView _usage = new UiListView();
+    private readonly ListBox _running = new UiListBox();
+    private readonly ListView _files = new UiListView();
 
     // ใช้ฟอนต์ร่วมที่ cache ไว้ ไม่สร้าง/Dispose ต่อฟอร์ม
 
@@ -42,44 +42,44 @@ internal sealed class ActivityForm : Form
     private void BuildLayout()
     {
         // ----- แถบบน: โปรแกรมที่กำลังแอคทีฟ -----
-        var top = new Panel { Dock = DockStyle.Top, Height = 72, BackColor = Theme.Surface, Padding = new Padding(16, 10, 16, 10) };
+        var top = new Panel { Dock = DockStyle.Top, Height = Theme.Space6 * 2 + Theme.Space2, BackColor = Theme.Surface, Padding = new Padding(Theme.Space4, Theme.Space2, Theme.Space4, Theme.Space2) };
         _active.Dock = DockStyle.Top;
-        _active.Height = 28;
+        _active.Height = Theme.Space5 + Theme.Space1;
         _active.Text = "กำลังเชื่อมต่อ...";
         _active.ForeColor = Theme.TextPrimary;
         _active.Font = Theme.FontTitle;
         _sub.Dock = DockStyle.Top;
-        _sub.Height = 20;
+        _sub.Height = Theme.Space5;
         _sub.ForeColor = Theme.TextMuted;
         top.Controls.Add(_sub);
         top.Controls.Add(_active);
 
         // ----- ล่าง: ไฟล์ดาวน์โหลด/ส่งออก -----
-        var filesPanel = new Panel { Dock = DockStyle.Bottom, Height = 220, BackColor = Theme.Background, Padding = new Padding(10, 6, 10, 10) };
+        var filesPanel = new Panel { Dock = DockStyle.Bottom, Height = Theme.ActivityFilesHeight, BackColor = Theme.Background, Padding = new Padding(Theme.Space2, Theme.Space1, Theme.Space2, Theme.Space2) };
         filesPanel.Controls.Add(SectionHeader("ไฟล์ที่ดาวน์โหลด / ส่งออก (ล่าสุดอยู่บน)"));
-        StyleListView(_files, ("เวลา", 120), ("ประเภท", 110), ("ไฟล์", 640));
+        StyleListView(_files, ("เวลา", Theme.FileTimeColumnWidth), ("ประเภท", Theme.FileKindColumnWidth), ("ไฟล์", Theme.FilePathColumnWidth));
         _files.Dock = DockStyle.Fill;
-        var filesHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 24, 0, 0) };
+        var filesHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, Theme.SectionHeaderHeight, 0, 0) };
         filesHost.Controls.Add(_files);
         filesPanel.Controls.Add(filesHost);
 
         // ----- กลาง: เวลาใช้งาน (ซ้าย) + โปรแกรมที่เปิดอยู่ (ขวา) -----
-        var mid = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Background, Padding = new Padding(10) };
+        var mid = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Background, Padding = new Padding(Theme.Space2) };
 
-        var right = new Panel { Dock = DockStyle.Right, Width = 300, BackColor = Theme.Background, Padding = new Padding(8, 0, 0, 0) };
+        var right = new Panel { Dock = DockStyle.Right, Width = Theme.ActivityRunningWidth, BackColor = Theme.Background, Padding = new Padding(Theme.Space2, 0, 0, 0) };
         right.Controls.Add(SectionHeader("โปรแกรมที่เปิดอยู่"));
         _running.Dock = DockStyle.Fill;
         _running.BorderStyle = BorderStyle.None;
         Theme.StyleList(_running);
-        var runHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 24, 0, 0) };
+        var runHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, Theme.SectionHeaderHeight, 0, 0) };
         runHost.Controls.Add(_running);
         right.Controls.Add(runHost);
 
-        var left = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Background, Padding = new Padding(0, 0, 8, 0) };
+        var left = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Background, Padding = new Padding(0, 0, Theme.Space2, 0) };
         left.Controls.Add(SectionHeader("เวลาที่ใช้แต่ละโปรแกรม (เรียงมากไปน้อย)"));
-        StyleListView(_usage, ("โปรแกรม", 230), ("เวลาที่ใช้", 120), ("หน้าต่างล่าสุด", 300));
+        StyleListView(_usage, ("โปรแกรม", Theme.ActivityProgramColumnWidth), ("เวลาที่ใช้", Theme.ActivityTimeColumnWidth), ("หน้าต่างล่าสุด", Theme.ActivityTitleColumnWidth));
         _usage.Dock = DockStyle.Fill;
-        var usageHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 24, 0, 0) };
+        var usageHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, Theme.SectionHeaderHeight, 0, 0) };
         usageHost.Controls.Add(_usage);
         left.Controls.Add(usageHost);
 
@@ -94,7 +94,7 @@ internal sealed class ActivityForm : Form
     private static Label SectionHeader(string text) => new()
     {
         Dock = DockStyle.Top,
-        Height = 24,
+        Height = Theme.SectionHeaderHeight,
         Text = text,
         ForeColor = Theme.TextMuted,
         Font = Theme.FontCaptionStrong,
@@ -148,7 +148,8 @@ internal sealed class ActivityForm : Form
                 _sub.Text = ex.Message;
                 _client?.Dispose();
                 _client = null;
-                try { await Task.Delay(3000, token); } catch { break; }
+                try { await Task.Delay(3000, token); }
+                catch (OperationCanceledException) { break; }
             }
         }
     }

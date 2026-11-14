@@ -32,7 +32,12 @@ internal static class Theme
     internal static readonly Color Danger = Color.FromArgb(248, 113, 113);
     internal static readonly Color DangerBackground = Color.FromArgb(153, 27, 27);
     internal static readonly Color DangerHover = Color.FromArgb(185, 28, 28);
+    internal static readonly Color DangerPressed = Mix(DangerBackground, Color.Black, 0.2);
     internal static readonly Color Offline = Color.FromArgb(181, 186, 193);
+    internal static readonly Color Link = Color.FromArgb(147, 197, 253);
+    internal static readonly Color ChatBubbleMine = Mix(Accent, Surface, 0.65);
+    internal static readonly Color ChatBubbleTheirs = SurfaceAlt;
+    internal const double BadgeBackgroundMix = 0.95;
 
     // 4/8px spacing grid
     internal const int Space1 = 4;
@@ -54,6 +59,35 @@ internal static class Theme
     internal const int StatusHeight = 28;
     internal const int CardWidth = 340;
     internal const int CardHeight = 240;
+    internal const int DialogMinWidth = 420;
+    internal const int DialogMinHeight = 200;
+    internal const int DialogFieldWidth = 420;
+    internal const int DialogTextWidth = 520;
+    internal const int DialogButtonWidth = 112;
+    internal const int ButtonWidthNarrow = 80;
+    internal const int ButtonWidthWide = 150;
+    internal const int ToastWidth = 360;
+    internal const int ToastHeight = 88;
+    internal const int ToastMargin = 16;
+    internal const int ToastGap = 8;
+    internal const int BubbleIndent = 120;
+    internal const int ChatBubbleIndent = 50;
+    internal const int ChatTextWidth = 420;
+    internal const int ChatTextPadding = 90;
+    internal const int MinChatTextWidth = 160;
+    internal const int AttachmentMaxWidth = 260;
+    internal const int AttachmentMaxHeight = 200;
+    internal const int ActivityFilesHeight = 240;
+    internal const int ActivityRunningWidth = 300;
+    internal const int SectionHeaderHeight = 24;
+    internal const int ActivityProgramColumnWidth = 230;
+    internal const int ActivityTimeColumnWidth = 120;
+    internal const int ActivityTitleColumnWidth = 300;
+    internal const int FileTimeColumnWidth = 120;
+    internal const int FileKindColumnWidth = 110;
+    internal const int FilePathColumnWidth = 640;
+    internal const int BlockDialogWidth = 600;
+    internal const int BlockDialogHeight = 500;
 
     // Shared font cache. Controls do not own these fonts; never dispose them.
     internal static readonly Font FontBody = new("Segoe UI", 9F);
@@ -62,7 +96,6 @@ internal static class Theme
     internal static readonly Font FontCaption = new("Segoe UI", 8F);
     internal static readonly Font FontCaptionStrong = new("Segoe UI", 8F, FontStyle.Bold);
     internal static readonly Font FontMedium = new("Segoe UI", 10F);
-    internal static readonly Font FontMediumStrong = new("Segoe UI", 10F, FontStyle.Bold);
     internal static readonly Font FontTitle = new("Segoe UI", 12F, FontStyle.Bold);
     internal static readonly Font FontHeading = new("Segoe UI", 14F, FontStyle.Bold);
     internal static readonly Font FontChat = new("Segoe UI", 10F);
@@ -70,14 +103,17 @@ internal static class Theme
     internal static readonly Font FontMono = new("Consolas", 10F);
     internal static readonly Font FontClock = new("Segoe UI", 32F, FontStyle.Bold);
     internal static readonly Font FontLockMessage = new("Segoe UI", 20F, FontStyle.Bold);
+    internal static readonly Font FontSecureDesktop = new("Segoe UI", 28F);
 
-    private static readonly ConcurrentDictionary<int, SolidBrush> Brushes = new();
-    private static readonly ConcurrentDictionary<int, Pen> Pens = new();
+    private static readonly ConcurrentDictionary<int, Lazy<SolidBrush>> Brushes = new();
+    private static readonly ConcurrentDictionary<(int Argb, float Width), Lazy<Pen>> Pens = new();
     private static readonly ToolTip ToolTip = new() { InitialDelay = 400, ReshowDelay = 100, AutoPopDelay = 6000 };
+    private static readonly MenuRenderer SharedMenuRenderer = new();
 
-    internal static SolidBrush Brush(Color color) => Brushes.GetOrAdd(color.ToArgb(), _ => new SolidBrush(color));
+    internal static SolidBrush Brush(Color color) =>
+        Brushes.GetOrAdd(color.ToArgb(), _ => new Lazy<SolidBrush>(() => new SolidBrush(color))).Value;
     internal static Pen Pen(Color color, float width = 1F) =>
-        Pens.GetOrAdd(unchecked(color.ToArgb() * 31 + (int)(width * 10)), _ => new Pen(color, width));
+        Pens.GetOrAdd((color.ToArgb(), width), _ => new Lazy<Pen>(() => new Pen(color, width))).Value;
 
     internal static Color Mix(Color a, Color b, double amount)
     {
@@ -170,7 +206,7 @@ internal static class Theme
 
     internal static void StyleMenu(ToolStrip menu)
     {
-        menu.Renderer = new MenuRenderer();
+        menu.Renderer = SharedMenuRenderer;
         menu.BackColor = Surface;
         menu.ForeColor = TextSecondary;
         menu.Font = FontBody;

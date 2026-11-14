@@ -9,11 +9,12 @@ internal sealed class ToastForm : Form
 
     public ToastForm(string title, string text, Color accent)
     {
+        DoubleBuffered = true;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
-        Size = new Size(360, 88);
+        Size = new Size(Theme.ToastWidth, Theme.ToastHeight);
         BackColor = Theme.Surface;
         Font = Theme.FontBody;
         Padding = new Padding(Theme.Space3);
@@ -64,6 +65,7 @@ internal sealed class ToastForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _life.Dispose();
+        Region = null;
         base.OnFormClosed(e);
     }
 }

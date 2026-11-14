@@ -13,14 +13,13 @@ internal sealed class StatusForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        StartPosition = FormStartPosition.CenterScreen;
         Padding = new Padding(Theme.Space5);
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoSize = true };
         void Row(string label, string value)
         {
             layout.Controls.Add(new Label { Text = label, Font = Theme.FontCaptionStrong, ForeColor = Theme.TextMuted, AutoSize = true, Margin = new Padding(0, Theme.Space3, 0, Theme.Space1) });
-            layout.Controls.Add(new Label { Text = value, Font = Theme.FontBody, ForeColor = Theme.TextPrimary, AutoSize = true, MaximumSize = new Size(500, 0) });
+            layout.Controls.Add(new Label { Text = value, Font = Theme.FontBody, ForeColor = Theme.TextPrimary, AutoSize = true, MaximumSize = new Size(Theme.DialogTextWidth, 0) });
         }
         Row("ชื่อเครื่อง", machine);
         Row("IP ของเครื่องนี้", ips);
@@ -28,7 +27,7 @@ internal sealed class StatusForm : Form
         Row("กุญแจของ Master", keyState);
         Row("Master ที่เชื่อมต่ออยู่", masters);
         if (error is not null) Row("ปัญหาที่พบ", error);
-        var close = new UiButton("ปิด", ButtonKind.Primary) { Width = 100, Anchor = AnchorStyles.Right };
+        var close = new UiButton("ปิด", ButtonKind.Primary) { Width = Theme.DialogButtonWidth, Anchor = AnchorStyles.Right };
         close.Click += (_, _) => Close();
         layout.Controls.Add(close);
         Controls.Add(layout);

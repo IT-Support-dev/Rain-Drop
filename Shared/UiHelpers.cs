@@ -44,16 +44,22 @@ internal static class UiWindowPlacement
         form.MinimumSize = minimum;
         form.Size = defaultSize;
         var saved = Load(key);
+        form.StartPosition = saved is null ? FormStartPosition.CenterScreen : FormStartPosition.Manual;
         if (saved is not null)
         {
-            var screen = Screen.FromRectangle(new Rectangle(saved.X, saved.Y, saved.Width, saved.Height)).WorkingArea;
-            form.StartPosition = FormStartPosition.Manual;
-            form.Bounds = Clamp(new Rectangle(saved.X, saved.Y, saved.Width, saved.Height), screen, minimum);
+            // Saved bounds are physical pixels. Apply them on Load, after WinForms DPI autoscale,
+            // so a 150% session does not scale an already-150% rectangle a second time.
+            form.Load += (_, _) =>
+            {
+                var bounds = new Rectangle(saved.X, saved.Y, saved.Width, saved.Height);
+                var screen = Screen.FromRectangle(bounds).WorkingArea;
+                form.Bounds = Clamp(bounds, screen, form.MinimumSize);
+            };
         }
         form.FormClosed += (_, _) =>
         {
-            if (form.WindowState != FormWindowState.Normal) return;
-            Save(key, new WindowPlacement(form.Left, form.Top, form.Width, form.Height));
+            var bounds = form.WindowState == FormWindowState.Normal ? form.Bounds : form.RestoreBounds;
+            Save(key, new WindowPlacement(bounds.Left, bounds.Top, bounds.Width, bounds.Height));
         };
     }
 

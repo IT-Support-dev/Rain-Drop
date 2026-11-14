@@ -28,7 +28,13 @@ internal sealed class UiButton : Button
         {
             Image = UiIcons.Get(icon, ForeColor, Theme.IconSize);
             TextImageRelation = TextImageRelation.ImageBeforeText;
-            if (text.Length == 0) Width = Theme.ButtonHeight;
+            if (text.Length == 0)
+            {
+                Width = Theme.ButtonHeight;
+                Padding = Padding.Empty;
+                TextImageRelation = TextImageRelation.Overlay;
+                ImageAlign = ContentAlignment.MiddleCenter;
+            }
         }
         MouseEnter += (_, _) => { _hover = true; ApplyColors(); };
         MouseLeave += (_, _) => { _hover = false; ApplyColors(); };
@@ -48,7 +54,7 @@ internal sealed class UiButton : Button
                 break;
             case ButtonKind.Danger:
                 back = Theme.DangerBackground; fore = Theme.OnAccent; hover = Theme.DangerHover;
-                FlatAppearance.MouseDownBackColor = Theme.Mix(Theme.DangerBackground, Color.Black, 0.2);
+                FlatAppearance.MouseDownBackColor = Theme.DangerPressed;
                 break;
             case ButtonKind.Ghost:
                 back = Color.Transparent; fore = Theme.TextSecondary; hover = Theme.SurfaceHover;
@@ -71,7 +77,7 @@ internal sealed class UiButton : Button
     private void ApplyRegion()
     {
         using var path = Theme.RoundedRect(new Rectangle(0, 0, Width, Height), Theme.RadiusSmall);
-        var old = Region; Region = new Region(path); old?.Dispose();
+        Region = new Region(path);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -86,6 +92,11 @@ internal sealed class UiButton : Button
     }
     protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
     protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) Region = null;
+        base.Dispose(disposing);
+    }
 }
 
 internal sealed class UiCard : Panel
@@ -102,7 +113,7 @@ internal sealed class UiCard : Panel
     private void ApplyRegion()
     {
         using var path = Theme.RoundedRect(new Rectangle(0, 0, Width, Height), Theme.RadiusMedium);
-        var old = Region; Region = new Region(path); old?.Dispose();
+        Region = new Region(path);
     }
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -110,6 +121,11 @@ internal sealed class UiCard : Panel
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         using var path = Theme.RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), Theme.RadiusMedium);
         e.Graphics.DrawPath(Theme.Pen(Theme.Border), path);
+    }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) Region = null;
+        base.Dispose(disposing);
     }
 }
 
@@ -148,7 +164,7 @@ internal sealed class StatusBadge : Control
         };
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         using var path = Theme.RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), Theme.RadiusSmall);
-        e.Graphics.FillPath(Theme.Brush(Theme.Mix(color, Theme.Surface, 0.82)), path);
+        e.Graphics.FillPath(Theme.Brush(Theme.Mix(color, Theme.Surface, Theme.BadgeBackgroundMix)), path);
         e.Graphics.FillEllipse(Theme.Brush(color), Theme.Space2, Height / 2 - 3, 6, 6);
         TextRenderer.DrawText(e.Graphics, _text, Font, new Rectangle(Theme.Space4, 0, Width - Theme.Space4, Height), color,
             TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
@@ -169,4 +185,19 @@ internal static class UiInput
 internal sealed class UiFlowPanel : FlowLayoutPanel
 {
     internal UiFlowPanel() { DoubleBuffered = true; }
+}
+
+internal sealed class UiPictureBox : PictureBox
+{
+    internal UiPictureBox() { DoubleBuffered = true; }
+}
+
+internal sealed class UiListView : ListView
+{
+    internal UiListView() { DoubleBuffered = true; }
+}
+
+internal sealed class UiListBox : ListBox
+{
+    internal UiListBox() { DoubleBuffered = true; }
 }

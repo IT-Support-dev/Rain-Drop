@@ -70,8 +70,8 @@ internal sealed class HostTile : UserControl
         BackColor = Theme.Border;
         DoubleBuffered = true;
 
-        var surface = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Padding = new Padding(Theme.Space2) };
-        _pic = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
+        var surface = new UiCard { Dock = DockStyle.Fill, Padding = new Padding(Theme.Space2) };
+        _pic = new UiPictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
         _name = new Label
         {
             Dock = DockStyle.Top,
@@ -125,13 +125,13 @@ internal sealed class HostTile : UserControl
         _pic.MouseClick += Select;
         _name.MouseClick += Select;
         _pic.DoubleClick += (_, _) => OpenRemoteRequested?.Invoke(this, EventArgs.Empty);
-        MouseEnter += (_, _) => _shortcuts.Visible = true;
-        MouseLeave += (_, _) => { if (!ClientRectangle.Contains(PointToClient(Cursor.Position))) _shortcuts.Visible = false; };
-        foreach (Control c in surface.Controls)
+        void Hover(Control c)
         {
             c.MouseEnter += (_, _) => _shortcuts.Visible = true;
             c.MouseLeave += (_, _) => { if (!ClientRectangle.Contains(PointToClient(Cursor.Position))) _shortcuts.Visible = false; };
+            foreach (Control child in c.Controls) Hover(child);
         }
+        Hover(this);
         AccessibleName = $"เครื่อง {host.Name}";
     }
 

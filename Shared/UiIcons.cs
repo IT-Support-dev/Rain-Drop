@@ -5,17 +5,17 @@ namespace RainDrop.Shared;
 
 internal enum UiIcon
 {
-    None, Search, Plus, Monitor, Lock, Unlock, Activity, Block, Chat, Message, Power, More,
-    Settings, Refresh, Computer, User, Send, Attach, Mic, Stop, Play, Close, Check, Warning, Info, Bell, Folder
+    None, Plus, Monitor, Lock, Unlock, Activity, Block, Chat, Message, Power, More,
+    Settings, Refresh, Send, Attach, Mic, Play, Warning, Info, Bell
 }
 
 /// <summary>One stroke family, cached bitmaps. Icons are generated once per icon/color/size.</summary>
 internal static class UiIcons
 {
-    private static readonly ConcurrentDictionary<(UiIcon, int, int), Bitmap> Cache = new();
+    private static readonly ConcurrentDictionary<(UiIcon, int, int), Lazy<Bitmap>> Cache = new();
 
     internal static Bitmap Get(UiIcon icon, Color color, int size = Theme.IconSize) =>
-        Cache.GetOrAdd((icon, color.ToArgb(), size), _ => Render(icon, color, size));
+        Cache.GetOrAdd((icon, color.ToArgb(), size), _ => new Lazy<Bitmap>(() => Render(icon, color, size))).Value;
 
     private static Bitmap Render(UiIcon icon, Color color, int size)
     {
@@ -32,7 +32,6 @@ internal static class UiIcons
         void Poly(params PointF[] pts) => g.DrawLines(pen, pts);
         switch (icon)
         {
-            case UiIcon.Search: Circle(2, 2, 8); Line(8, 8, 14, 14); break;
             case UiIcon.Plus: Line(8, 2, 8, 14); Line(2, 8, 14, 8); break;
             case UiIcon.Monitor: Rect(2, 3, 12, 8); Line(6, 14, 10, 14); Line(8, 11, 8, 14); break;
             case UiIcon.Lock: Rect(3, 7, 10, 7); g.DrawArc(pen, 5 * s, 2 * s, 6 * s, 6 * s, 180, 180); break;
@@ -45,19 +44,13 @@ internal static class UiIcons
             case UiIcon.More: Circle(2, 7, 1.5F); Circle(7, 7, 1.5F); Circle(12, 7, 1.5F); break;
             case UiIcon.Settings: Circle(5, 5, 6); Circle(7, 7, 2); Line(8, 1, 8, 3); Line(8, 13, 8, 15); Line(1, 8, 3, 8); Line(13, 8, 15, 8); break;
             case UiIcon.Refresh: g.DrawArc(pen, 3 * s, 3 * s, 10 * s, 10 * s, 30, 270); Poly(P(12, 2), P(13, 6), P(9, 6)); break;
-            case UiIcon.Computer: Rect(2, 3, 12, 8); Line(6, 14, 10, 14); Line(8, 11, 8, 14); break;
-            case UiIcon.User: Circle(5, 2, 6); g.DrawArc(pen, 2 * s, 9 * s, 12 * s, 8 * s, 180, 180); break;
             case UiIcon.Send: Poly(P(2, 8), P(14, 2), P(10, 14), P(8, 9), P(2, 8)); Line(8, 9, 14, 2); break;
             case UiIcon.Attach: g.DrawArc(pen, 4 * s, 3 * s, 8 * s, 10 * s, 90, 270); Line(12, 8, 12, 12); break;
             case UiIcon.Mic: Rect(6, 2, 4, 8); g.DrawArc(pen, 3 * s, 7 * s, 10 * s, 7 * s, 0, 180); Line(8, 14, 8, 16); break;
-            case UiIcon.Stop: Rect(4, 4, 8, 8); break;
             case UiIcon.Play: Poly(P(5, 3), P(12, 8), P(5, 13), P(5, 3)); break;
-            case UiIcon.Close: Line(3, 3, 13, 13); Line(13, 3, 3, 13); break;
-            case UiIcon.Check: Poly(P(2, 8), P(6, 12), P(14, 3)); break;
             case UiIcon.Warning: Poly(P(8, 2), P(15, 14), P(1, 14), P(8, 2)); Line(8, 6, 8, 10); Line(8, 12, 8, 12.5F); break;
             case UiIcon.Info: Circle(2, 2, 12); Line(8, 7, 8, 12); Line(8, 4, 8, 4.5F); break;
             case UiIcon.Bell: g.DrawArc(pen, 4 * s, 2 * s, 8 * s, 9 * s, 180, 180); Line(4, 11, 12, 11); Line(6, 14, 10, 14); break;
-            case UiIcon.Folder: Poly(P(2, 4), P(6, 4), P(8, 6), P(14, 6), P(14, 13), P(2, 13), P(2, 4)); break;
         }
         return bmp;
     }

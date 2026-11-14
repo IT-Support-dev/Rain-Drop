@@ -39,7 +39,7 @@ public sealed class ChatWindow : Form
 
         Text = title;
         Theme.ConfigureForm(this, new Size(360, 320));
-        UiWindowPlacement.Attach(this, "chat", new Size(480, 600), new Size(360, 320));
+        UiWindowPlacement.Attach(this, "chat:" + title, new Size(480, 600), new Size(360, 320));
         Font = Theme.FontChat;
 
         _list = new UiFlowPanel
@@ -55,15 +55,16 @@ public sealed class ChatWindow : Form
 
         _input = UiInput.Create();
         _input.Dock = DockStyle.Fill;
+        _input.TabIndex = 0;
         _input.AccessibleName = "ข้อความที่จะส่ง";
-        _sendButton = new UiButton("ส่ง", ButtonKind.Primary, UiIcon.Send) { Dock = DockStyle.Right, Width = 80 };
+        _sendButton = new UiButton("ส่ง", ButtonKind.Primary, UiIcon.Send) { Dock = DockStyle.Right, Width = Theme.ButtonWidthNarrow };
         _recordButton = new UiButton("อัดเสียง", ButtonKind.Secondary, UiIcon.Mic)
         {
             Dock = DockStyle.Left,
-            Width = 112,
+            Width = Theme.DialogButtonWidth,
             Visible = onSendVoice is not null,
         };
-        _cancelRecordButton = new UiButton("ยกเลิก", ButtonKind.Ghost) { Dock = DockStyle.Right, Width = 80, Visible = false };
+        _cancelRecordButton = new UiButton("ยกเลิก", ButtonKind.Ghost) { Dock = DockStyle.Right, Width = Theme.ButtonWidthNarrow, Visible = false };
 
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = Theme.ButtonHeightLarge + Theme.Space4, Padding = new Padding(Theme.Space3), BackColor = Theme.Surface };
         bottom.Controls.Add(_input);
@@ -74,6 +75,9 @@ public sealed class ChatWindow : Form
         Controls.Add(_list);
         Controls.Add(bottom);
 
+        _recordButton.TabIndex = 1;
+        _sendButton.TabIndex = 2;
+        _cancelRecordButton.TabIndex = 3;
         _sendButton.Click += (_, _) => SendCurrentText();
         _input.KeyDown += (_, e) =>
         {
@@ -151,6 +155,7 @@ public sealed class ChatWindow : Form
         Theme.StyleMenu(menu);
         menu.Items.Add("บันทึกเป็นไฟล์ .wav...", null, (_, _) => SaveVoice(msg));
         button.ContextMenuStrip = menu;
+        button.Disposed += (_, _) => menu.Dispose();
 
         AddBubble(mine ? "คุณ" : msg.Sender, msg.Time, mine, button);
     }
@@ -231,7 +236,7 @@ public sealed class ChatWindow : Form
         }
 
         _recordButton.Kind = ButtonKind.Danger;
-        _recordButton.Width = 150;
+        _recordButton.Width = Theme.ButtonWidthWide;
         _cancelRecordButton.Visible = true;
         _sendButton.Visible = false;
         _input.Enabled = false;
@@ -279,7 +284,7 @@ public sealed class ChatWindow : Form
         {
             _recordButton.Kind = ButtonKind.Secondary;
             _recordButton.Text = "อัดเสียง";
-            _recordButton.Width = 112;
+            _recordButton.Width = Theme.DialogButtonWidth;
             _cancelRecordButton.Visible = false;
             _sendButton.Visible = true;
             _input.Enabled = true;
@@ -287,7 +292,7 @@ public sealed class ChatWindow : Form
         }
     }
 
-    private int BubbleTextWidth => Math.Max(160, _list.ClientSize.Width - 90);
+    private int BubbleTextWidth => Math.Max(Theme.MinChatTextWidth, _list.ClientSize.Width - Theme.ChatTextPadding);
 
     private void AddBubble(string sender, DateTime time, bool mine, Control content)
     {
@@ -297,9 +302,9 @@ public sealed class ChatWindow : Form
             WrapContents = false,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            BackColor = mine ? Theme.Mix(Theme.Accent, Theme.Surface, 0.65) : Theme.SurfaceAlt,
+            BackColor = mine ? Theme.ChatBubbleMine : Theme.ChatBubbleTheirs,
             Padding = new Padding(Theme.Space3, Theme.Space2, Theme.Space3, Theme.Space2),
-            Margin = new Padding(mine ? 50 : Theme.Space1, Theme.Space1, mine ? Theme.Space1 : 50, Theme.Space1),
+            Margin = new Padding(mine ? Theme.ChatBubbleIndent : Theme.Space1, Theme.Space1, mine ? Theme.Space1 : Theme.ChatBubbleIndent, Theme.Space1),
         };
         bubble.Controls.Add(new Label
         {

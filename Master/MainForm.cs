@@ -14,7 +14,7 @@ internal sealed class MainForm : Form
     private readonly MasterKey _key;
     private readonly MasterPki _pki;
     private readonly FlowLayoutPanel _panel;                 // ตารางจอภาพ (เนื้อหาจริง)
-    private readonly FlowLayoutPanel _channelList = new();   // รายการ "ช่อง" = เครื่องลูก (แถบซ้าย)
+    private readonly FlowLayoutPanel _channelList = new UiFlowPanel();   // รายการ "ช่อง" = เครื่องลูก (แถบซ้าย)
     private readonly Label _status = new();
     private readonly System.Windows.Forms.Timer _sidebarTimer = new() { Interval = 1500 };
     private readonly List<HostTile> _tiles = new();
@@ -36,14 +36,18 @@ internal sealed class MainForm : Form
         _pki = MasterPki.LoadOrCreate();
 
         _panel = new UiFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.Background };
-        Controls.Add(BuildContent());
-        Controls.Add(BuildSidebar());
+        var content = BuildContent();
+        content.TabIndex = 1;
+        Controls.Add(content);
+        var sidebar = BuildSidebar();
+        sidebar.TabIndex = 0;
+        Controls.Add(sidebar);
 
         foreach (var host in _settings.Hosts)
             AddTile(host);
         ApplyFilter();
 
-        _sidebarTimer.Tick += (_, _) => RefreshSidebars();
+        _sidebarTimer.Tick += (_, _) => ApplyFilter();
         _sidebarTimer.Start();
         RefreshSidebars();
     }
@@ -62,10 +66,12 @@ internal sealed class MainForm : Form
         var sidebar = new Panel { Dock = DockStyle.Left, Width = Theme.SidebarWidth, BackColor = Theme.Surface, Padding = new Padding(Theme.Space3) };
         var header = new Label { Dock = DockStyle.Top, Height = Theme.ToolbarHeight, Text = "Rain Drop", ForeColor = Theme.TextPrimary, Font = Theme.FontHeading, TextAlign = ContentAlignment.MiddleLeft };
         _search.Dock = DockStyle.Top;
+        _search.TabIndex = 0;
         _search.AccessibleName = "ค้นหาเครื่อง";
         Theme.SetToolTip(_search, "ค้นหาชื่อเครื่องหรือ IP");
         _search.TextChanged += (_, _) => { _query = _search.Text; ApplyFilter(); };
         _filter.Dock = DockStyle.Top;
+        _filter.TabIndex = 1;
         _filter.Font = Theme.FontBody;
         _filter.BackColor = Theme.InputBackground;
         _filter.ForeColor = Theme.TextPrimary;
@@ -84,10 +90,13 @@ internal sealed class MainForm : Form
         _channelList.BackColor = Theme.Surface;
 
         var settings = new UiButton("ตั้งค่า", ButtonKind.Ghost, UiIcon.Settings) { Dock = DockStyle.Bottom };
+        settings.TabIndex = 4;
         settings.Click += (_, _) => ShowSettings();
         var community = new UiButton("ชุมชน", ButtonKind.Ghost, UiIcon.Chat) { Dock = DockStyle.Bottom };
+        community.TabIndex = 3;
         community.Click += (_, _) => OpenCommunity();
         var add = new UiButton("เพิ่มเครื่อง", ButtonKind.Secondary, UiIcon.Plus) { Dock = DockStyle.Bottom };
+        add.TabIndex = 2;
         add.Click += (_, _) => AddHost();
 
         sidebar.Controls.Add(_channelList);
@@ -169,6 +178,7 @@ internal sealed class MainForm : Form
         menu.Items.Add("ส่งออก enrollment bundle...", null, (_, _) => ExportEnrollment());
         menu.Items.Add("เพิกถอนเครื่องที่เลือก", null, (_, _) => RevokeSelected());
         menu.Items.Add("ตรวจสอบ audit chain", null, (_, _) => VerifyAudit());
+        menu.Closed += (_, _) => menu.Dispose();
         menu.Show(Cursor.Position);
     }
 
@@ -192,6 +202,7 @@ internal sealed class MainForm : Form
         foreach (var tile in _tiles)
             tile.Visible = UiFilter.Matches(_query, _statusFilter, tile.IsOnline, tile.Host.Name, tile.Host.Address);
         _empty.Visible = !_tiles.Any(t => t.Visible);
+        if (_empty.Visible) _empty.BringToFront();
         _sidebarSignature = "";
         RefreshSidebars();
     }
@@ -207,7 +218,6 @@ internal sealed class MainForm : Form
                 foreach (var old in _channelRows.Values)
                 {
                     _channelList.Controls.Remove(old);
-                    old.ContextMenuStrip?.Dispose();
                     old.Dispose();
                 }
                 _channelRows.Clear();
@@ -265,6 +275,7 @@ internal sealed class MainForm : Form
         menu.Items.Add("ควบคุมระยะไกล", null, (_, _) => OpenRemote(tile));
         menu.Items.Add("แชท", null, (_, _) => OpenChat(tile));
         row.ContextMenuStrip = menu;
+        row.Disposed += (_, _) => menu.Dispose();
         row.AccessibleName = tile.Host.Name;
         return row;
     }
@@ -285,7 +296,13 @@ internal sealed class MainForm : Form
         menu.Items.Add("แชท", null, (_, _) => OpenChat(tile));
         menu.Items.Add("ควบคุมระยะไกล", null, (_, _) => OpenRemote(tile));
         menu.Items.Add("ดูกิจกรรม", null, (_, _) => OpenActivity(tile));
-        foreach (Control c in tile.Controls) c.ContextMenuStrip = menu;
+        void AssignMenu(Control c)
+        {
+            c.ContextMenuStrip = menu;
+            foreach (Control child in c.Controls) AssignMenu(child);
+        }
+        AssignMenu(tile);
+        tile.Disposed += (_, _) => menu.Dispose();
         _tiles.Add(tile);
         _panel.Controls.Add(tile);
         tile.Start();
@@ -589,11 +606,11 @@ internal sealed class MainForm : Form
     private void RepositionToasts()
     {
         var wa = Screen.FromControl(this).WorkingArea;
-        int y = wa.Bottom - 16;
+        int y = wa.Bottom - Theme.ToastMargin;
         foreach (var t in _toasts)
         {
-            y -= t.Height + 8;
-            t.Location = new Point(wa.Right - t.Width - 16, y);
+            y -= t.Height + Theme.ToastGap;
+            t.Location = new Point(wa.Right - t.Width - Theme.ToastMargin, y);
         }
     }
 

@@ -534,6 +534,7 @@ internal sealed class AgentContext : ApplicationContext, IAgentHandler
             _block.Dispose();
             _chat?.ForceClose();
             _community?.Close();
+            _tray.ContextMenuStrip?.Dispose();
             _tray.Dispose();
             _ui.Dispose();
         }

@@ -30,7 +30,7 @@ internal static class UiDialog
         int selected = cancelIndex;
         values = null;
         using var form = new Form();
-        Theme.ConfigureForm(form, new Size(420, 200));
+        Theme.ConfigureForm(form, new Size(Theme.DialogMinWidth, Theme.DialogMinHeight));
         form.Text = title;
         form.FormBorderStyle = FormBorderStyle.FixedDialog;
         form.StartPosition = FormStartPosition.CenterParent;
@@ -54,7 +54,7 @@ internal static class UiDialog
         layout.Controls.Add(head);
 
         if (message is not null)
-            layout.Controls.Add(new Label { Text = message, Font = Theme.FontBody, ForeColor = Theme.TextSecondary, AutoSize = true, MaximumSize = new Size(520, 0), Margin = new Padding(0, 0, 0, Theme.Space3) });
+            layout.Controls.Add(new Label { Text = message, Font = Theme.FontBody, ForeColor = Theme.TextSecondary, AutoSize = true, MaximumSize = new Size(Theme.DialogTextWidth, 0), Margin = new Padding(0, 0, 0, Theme.Space3) });
 
         var boxes = new List<TextBox>();
         if (fields is not null)
@@ -64,7 +64,8 @@ internal static class UiDialog
             {
                 grid.Controls.Add(new Label { Text = label, AutoSize = true, Font = Theme.FontBody, ForeColor = Theme.TextSecondary, Margin = new Padding(0, Theme.Space2, 0, Theme.Space1) });
                 var box = UiInput.Create(value, secret: secret);
-                box.Width = 420;
+                box.Width = Theme.DialogFieldWidth;
+                box.TabIndex = boxes.Count;
                 box.AccessibleName = label;
                 boxes.Add(box);
                 grid.Controls.Add(box);
@@ -78,7 +79,7 @@ internal static class UiDialog
         {
             int index = i;
             var (text, buttonKind) = buttons[i];
-            var button = new UiButton(text, buttonKind) { Width = 112, Height = Theme.ButtonHeightLarge };
+            var button = new UiButton(text, buttonKind) { Width = Theme.DialogButtonWidth, Height = Theme.ButtonHeightLarge, TabIndex = boxes.Count + i };
             button.Click += (_, _) => { selected = index; form.DialogResult = index == cancelIndex ? DialogResult.Cancel : DialogResult.OK; form.Close(); };
             actions.Controls.Add(button);
             if (i == 0) form.AcceptButton = button;
