@@ -6,14 +6,14 @@ namespace RainDrop.Tests;
 public class UiHelpersTests
 {
     [Theory]
-    [InlineData("", MachineStatusFilter.All, true, "PC-01", "10.0.0.1", true)]
-    [InlineData("pc", MachineStatusFilter.All, false, "PC-01", "10.0.0.1", true)]
-    [InlineData("10.0.0", MachineStatusFilter.All, true, "PC-01", "10.0.0.1", true)]
-    [InlineData("missing", MachineStatusFilter.All, true, "PC-01", "10.0.0.1", false)]
-    [InlineData("", MachineStatusFilter.Online, false, "PC-01", "10.0.0.1", false)]
-    [InlineData("", MachineStatusFilter.Offline, true, "PC-01", "10.0.0.1", false)]
-    public void Filter_CombinesQueryAndStatus(string query, MachineStatusFilter status, bool online, string name, string address, bool expected) =>
-        Assert.Equal(expected, UiFilter.Matches(query, status, online, name, address));
+    [InlineData("", 0, true, "PC-01", "10.0.0.1", true)]
+    [InlineData("pc", 0, false, "PC-01", "10.0.0.1", true)]
+    [InlineData("10.0.0", 0, true, "PC-01", "10.0.0.1", true)]
+    [InlineData("missing", 0, true, "PC-01", "10.0.0.1", false)]
+    [InlineData("", 1, false, "PC-01", "10.0.0.1", false)]
+    [InlineData("", 2, true, "PC-01", "10.0.0.1", false)]
+    public void Filter_CombinesQueryAndStatus(string query, int status, bool online, string name, string address, bool expected) =>
+        Assert.Equal(expected, UiFilter.Matches(query, (MachineStatusFilter)status, online, name, address));
 
     [Fact]
     public void CountText_ShowsVisibleAndTotal()
