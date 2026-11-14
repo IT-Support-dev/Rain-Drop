@@ -1,6 +1,8 @@
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text.Json;
 using RainDrop.Shared;
 
@@ -11,13 +13,15 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        // โหมดใช้ตอนติดตั้ง: เขียน agent.json พร้อมรหัสผ่านที่ hash แล้ว
-        //   RainDrop.Agent.exe --init-config "<โฟลเดอร์>" "<รหัสผ่าน>" <พอร์ต>
+        // โหมดใช้ตอนติดตั้ง (สิทธิ์ผู้ดูแล): เขียน agent.json (ไม่มีรหัส) + private\credentials.json (PBKDF2 hash)
+        //   RainDrop.Agent.exe --init-config "<โฟลเดอร์>" "<รหัสผ่าน>" <พอร์ต> [<Hub>]
         if (args.Length >= 3 && args[0] == "--init-config")
         {
             int port = args.Length >= 4 && int.TryParse(args[3], out int p) ? p : Protocol.DefaultPort;
             string hub = args.Length >= 5 ? args[4] : "";
-            return AgentConfig.WriteInitial(args[1], args[2], port, hub) ? 0 : 1;
+            if (AgentConfig.WriteInitial(args[1], args[2], port, hub, out string initError)) return 0;
+            Console.Error.WriteLine("ตั้งรหัสผ่านไม่สำเร็จ: " + initError);
+            return 1;
         }
 
         // ให้รันได้แค่ 1 ตัวต่อ session ของผู้ใช้ (ถ้า Service ปลุกซ้ำจะไม่เปิดซ้อน)
@@ -38,31 +42,20 @@ internal sealed class AgentConfig
 {
     public int Port { get; set; } = Protocol.DefaultPort;
 
-    /// <summary>รหัสผ่านสำหรับ "ออกจากโปรแกรม" เก็บเป็น PBKDF2 (ไม่เก็บรหัสจริง)</summary>
-    public string? PasswordHash { get; set; }
-    public string? PasswordSalt { get; set; }
-
     /// <summary>ที่อยู่เซิร์ฟเวอร์กลาง (Hub) สำหรับห้องชุมชน ตั้งค่าตอนติดตั้งด้วย /HUB=</summary>
     public string HubAddress { get; set; } = "";
 
-    public static string Folder => AppContext.BaseDirectory;
-    public static string ConfigPath => Path.Combine(Folder, "agent.json");
-    public static string PublicKeyPath => Path.Combine(Folder, "agent-public.pem");
+    /// <summary>
+    /// โฟลเดอร์ค่าตั้งกลางที่ผู้ใช้ทั่วไป "เขียนไม่ได้" (Service เป็นคนตั้ง ACL ตอนเริ่มทำงาน)
+    /// เดิมอยู่ในโฟลเดอร์โปรแกรมและใช้ส่งสัญญาณหยุดซึ่งผู้ใช้ปลอมได้ จึงย้ายมาที่นี่
+    /// </summary>
+    public static string SharedFolder => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RainDrop");
 
-    /// <summary>โฟลเดอร์ที่ทั้ง Service (SYSTEM) และ Agent (ผู้ใช้) เขียนได้ ใช้ส่งสัญญาณกัน</summary>
-    public static string SharedFolder
-    {
-        get
-        {
-            string dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RainDrop");
-            Directory.CreateDirectory(dir);
-            return dir;
-        }
-    }
+    public static string ConfigPath => Path.Combine(SharedFolder, "agent.json");
 
-    /// <summary>ไฟล์สัญญาณให้ Service หยุดปลุก Agent (ใส่ token ที่ Service ส่งมาให้)</summary>
-    public static string StopSignalPath => Path.Combine(SharedFolder, "agent-stop.signal");
+    /// <summary>กุญแจสาธารณะอยู่ข้างไฟล์โปรแกรม (Program Files) ซึ่งผู้ใช้ทั่วไปเขียนทับไม่ได้</summary>
+    public static string PublicKeyPath => Path.Combine(AppContext.BaseDirectory, "agent-public.pem");
 
     public static AgentConfig Load()
     {
@@ -73,7 +66,7 @@ internal sealed class AgentConfig
         }
         catch (Exception ex)
         {
-            // อ่าน agent.json ไม่ได้ = พอร์ต/รหัสผ่าน/ที่อยู่ Hub ที่ตั้งตอนติดตั้งหายไปทั้งหมด
+            // อ่าน agent.json ไม่ได้ = พอร์ต/ที่อยู่ Hub ที่ตั้งตอนติดตั้งหายไป
             // ยังต้องเปิดโปรแกรมต่อได้ แต่ต้องมีร่องรอยให้ตรวจสอบว่าทำไมค่าตั้งไม่ตรง
             Diag.Error("AgentConfig.Load", $"อ่านค่าตั้งที่ '{ConfigPath}' ไม่สำเร็จ จึงใช้ค่าเริ่มต้น", ex);
         }
@@ -89,53 +82,94 @@ internal sealed class AgentConfig
         return key;
     }
 
-    // ---------- รหัสผ่าน ----------
+    // ---------- เขียนค่าตั้งต้นตอนติดตั้ง (ตัวติดตั้งรันด้วยสิทธิ์ผู้ดูแล) ----------
 
-    public bool HasPassword => !string.IsNullOrEmpty(PasswordHash) && !string.IsNullOrEmpty(PasswordSalt);
-
-    public bool VerifyPassword(string input)
+    /// <summary>รูปไฟล์ที่ Service อ่าน (อยู่ใน private\credentials.json ซึ่ง Users ไม่มีสิทธิ์อ่าน)</summary>
+    internal sealed class StoredCredentials
     {
-        if (!HasPassword) return true; // ไม่ได้ตั้งรหัส = ให้ออกได้เลย
+        public string? PasswordSalt { get; set; }
+        public string? PasswordHash { get; set; }
+    }
+
+    /// <summary>
+    /// เขียน agent.json (ไม่มีรหัสผ่านอีกต่อไป) และ private\credentials.json (PBKDF2 hash)
+    /// ปฏิเสธรหัสผ่านว่างหรือสั้นกว่า 8 ตัวอักษร — ไม่มีรหัสเริ่มต้น "raindrop" อีกแล้ว
+    /// การตั้ง ACL ปิดสิทธิ์เขียนของ Users ทำโดยตัวติดตั้ง (icacls) และ Service ย้ำอีกครั้งตอนเริ่ม
+    /// </summary>
+    public static bool WriteInitial(string folder, string password, int port, string hubAddress, out string error)
+    {
+        error = "";
+        if (!PasswordHashing.IsAcceptable(password))
+        {
+            error = $"รหัสผ่านต้องยาวอย่างน้อย {PasswordHashing.MinPasswordLength} ตัวอักษร " +
+                    "ห้ามว่าง และห้ามมีอักขระควบคุม";
+            return false;
+        }
+
         try
         {
-            byte[] salt = Convert.FromBase64String(PasswordSalt!);
-            byte[] expected = Convert.FromBase64String(PasswordHash!);
-            byte[] actual = Rfc2898DeriveBytes.Pbkdf2(input, salt, 100_000, HashAlgorithmName.SHA256, expected.Length);
-            return CryptographicOperations.FixedTimeEquals(actual, expected);
+            byte[] salt = PasswordHashing.NewSalt();
+            byte[] hash = PasswordHashing.Hash(password, salt);
+            var options = new JsonSerializerOptions { WriteIndented = true };
+
+            Directory.CreateDirectory(folder);
+            string privateDir = Path.Combine(folder, "private");
+            Directory.CreateDirectory(privateDir);
+
+            // ตั้ง ACL ทันทีที่สร้างโฟลเดอร์ (รันด้วยสิทธิ์ผู้ดูแลตอนติดตั้ง) กันช่วงเวลาที่ไฟล์ hash ยังอ่านได้
+            // Service จะย้ำ ACL ซ้ำอีกครั้งตอนเริ่มทำงาน (ServiceStore.EnsureLayout)
+            HardenFolder(folder, usersRead: true);
+            HardenFolder(privateDir, usersRead: false);
+
+            File.WriteAllText(Path.Combine(folder, "agent.json"),
+                JsonSerializer.Serialize(new AgentConfig { Port = port, HubAddress = hubAddress }, options));
+
+            File.WriteAllText(Path.Combine(privateDir, "credentials.json"),
+                JsonSerializer.Serialize(new StoredCredentials
+                {
+                    PasswordSalt = Convert.ToBase64String(salt),
+                    PasswordHash = Convert.ToBase64String(hash),
+                }, options));
+
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
+            error = ex.Message;
+            Diag.Error("AgentConfig.WriteInitial", $"เขียนค่าตั้งต้นที่ '{folder}' ไม่สำเร็จ", ex);
             return false;
         }
     }
 
-    public static bool WriteInitial(string folder, string password, int port, string hubAddress = "")
+    /// <summary>
+    /// ตั้ง ACL: SYSTEM + Administrators เต็มสิทธิ์เสมอ, Users อ่านได้อย่างเดียวเมื่อ usersRead=true
+    /// ตัด inheritance ออกเพื่อไม่ให้สิทธิ์กว้างจากโฟลเดอร์แม่ (ProgramData) ติดลงมา
+    /// ใช้ SID มาตรฐานเพื่อไม่ขึ้นกับภาษาของ Windows
+    /// </summary>
+    private static void HardenFolder(string path, bool usersRead)
     {
-        try
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        foreach (var sid in new[] { system, admins })
+            security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+        if (usersRead)
         {
-            byte[] salt = RandomNumberGenerator.GetBytes(16);
-            byte[] hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100_000, HashAlgorithmName.SHA256, 32);
-            var config = new AgentConfig
-            {
-                Port = port,
-                PasswordSalt = Convert.ToBase64String(salt),
-                PasswordHash = Convert.ToBase64String(hash),
-                HubAddress = hubAddress,
-            };
-            Directory.CreateDirectory(folder);
-            File.WriteAllText(Path.Combine(folder, "agent.json"),
-                JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
-            return true;
+            var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+            security.AddAccessRule(new FileSystemAccessRule(users,
+                FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
         }
-        catch
-        {
-            return false;
-        }
+        new DirectoryInfo(path).SetAccessControl(security);
     }
 }
 
 /// <summary>
-/// ที่อยู่เซิร์ฟเวอร์ชุมชนที่ผู้ใช้ตั้งเองได้ เก็บในโฟลเดอร์ที่ผู้ใช้เขียนได้ (ProgramData\RainDrop)
+/// ที่อยู่เซิร์ฟเวอร์ชุมชนที่ผู้ใช้ตั้งเองได้ เก็บในโปรไฟล์ผู้ใช้ (%LocalAppData%\RainDrop) ซึ่งผู้ใช้เขียนได้
 /// ถ้ายังไม่เคยตั้ง จะใช้ค่าเริ่มต้นที่ผู้ดูแลกำหนดตอนติดตั้ง (จาก agent.json)
 /// </summary>
 internal sealed class CommunitySettings
@@ -143,7 +177,9 @@ internal sealed class CommunitySettings
     public string HubAddress { get; set; } = "";
     public string DisplayName { get; set; } = "";
 
-    private static string PathOnDisk => Path.Combine(AgentConfig.SharedFolder, "community.json");
+    // ค่าที่ผู้ใช้ตั้งเองเป็นรสนิยมส่วนตัว ไม่ใช่ความลับ จึงเก็บในโปรไฟล์ผู้ใช้ที่เขียนได้
+    private static string PathOnDisk => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RainDrop", "community.json");
 
     public static CommunitySettings Load(string defaultHub)
     {
@@ -162,7 +198,11 @@ internal sealed class CommunitySettings
 
     public void Save()
     {
-        try { File.WriteAllText(PathOnDisk, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })); }
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(PathOnDisk)!);
+            File.WriteAllText(PathOnDisk, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        }
         catch (Exception ex)
         {
             // บันทึกไม่ได้ = ค่าที่ผู้ใช้เพิ่งตั้งจะหายเมื่อเปิดใหม่ ไม่ควรล้มทั้งหน้าต่าง จึงบันทึกแทน
@@ -286,33 +326,24 @@ internal sealed class AgentContext : ApplicationContext
     /// </summary>
     private void RequestExit()
     {
-        if (_config.HasPassword)
+        var values = Prompt.Show(null, "ออกจากโปรแกรม Rain Drop Agent",
+            ("ใส่รหัสผ่านของผู้ดูแลระบบ:", ""));
+        if (values is null) return;
+
+        // Agent ไม่ตรวจรหัสเองแล้ว ส่งให้ Service (SYSTEM) ตรวจจาก hash ที่ผู้ใช่อ่านไม่ได้
+        // Service เป็นคนนับครั้งลองผิดและล็อกชั่วคราว กันเดารหัสโดยไม่จำกัด
+        ControlResponse? response = ServiceClient.RequestStop(values[0], out string? error);
+        if (response is null)
         {
-            var values = Prompt.Show(null, "ออกจากโปรแกรม Rain Drop Agent",
-                ("ใส่รหัสผ่านของผู้ดูแลระบบ:", ""));
-            if (values is null) return;
-            if (!_config.VerifyPassword(values[0]))
-            {
-                MessageBox.Show("รหัสผ่านไม่ถูกต้อง", "Rain Drop Agent",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-        }
-        else if (MessageBox.Show("ยังไม่ได้ตั้งรหัสผ่าน ต้องการออกจากโปรแกรมหรือไม่?",
-                     "Rain Drop Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-        {
+            MessageBox.Show(error ?? "ติดต่อบริการไม่ได้", "Rain Drop Agent",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-
-        // บอก Service ว่าให้หยุดปลุก: เขียน token ที่ได้รับตอนถูกเปิด
-        string token = Environment.GetEnvironmentVariable("RAINDROP_STOP_TOKEN") ?? "";
-        try { File.WriteAllText(AgentConfig.StopSignalPath, token); }
-        catch (Exception ex)
+        if (!response.Ok)
         {
-            // สำคัญ: เขียนสัญญาณหยุดไม่ได้ = Service จะปลุก Agent กลับมาทันทีทั้งที่ผู้ใช้ใส่รหัสถูกแล้ว
-            // ยังต้องปิดโปรเซสตามคำสั่งผู้ใช้ต่อ แต่ต้องบันทึกสาเหตุไว้ให้ตรวจสอบ
-            Diag.Error("AgentContext.RequestExit",
-                $"เขียนไฟล์สัญญาณหยุดที่ '{AgentConfig.StopSignalPath}' ไม่สำเร็จ Service จะปลุก Agent กลับมา", ex);
+            MessageBox.Show(response.Message, "Rain Drop Agent",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
         }
 
         _tray.Visible = false;

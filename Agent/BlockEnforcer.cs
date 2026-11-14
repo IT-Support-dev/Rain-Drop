@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
 using RainDrop.Shared;
 
 namespace RainDrop.Agent;
@@ -7,8 +6,8 @@ namespace RainDrop.Agent;
 /// <summary>
 /// บังคับใช้รายการบล็อกบนเครื่องลูก:
 /// - โปรแกรม: ตรวจทุก 2 วินาที ถ้าพบโปรแกรมที่ถูกบล็อกกำลังทำงาน จะปิดทันที
-/// - เว็บ/ลิงก์: เขียนลง blocklist.json ให้ Windows Service (สิทธิ์ SYSTEM) นำไปแก้ไฟล์ hosts
-///   (เพราะการแก้ hosts ต้องใช้สิทธิ์ผู้ดูแล ซึ่ง Agent ที่รันในสิทธิ์ผู้ใช้ทำไม่ได้)
+/// - เว็บ/ลิงก์: ส่งให้ Windows Service (สิทธิ์ SYSTEM) ผ่าน named pipe เพื่อตรวจรูปแบบแล้วแก้ไฟล์ hosts
+///   Agent ไม่เขียนไฟล์ค่าตั้งเองอีกต่อไป เพราะผู้ใช้ทั่วไปจะแก้ไฟล์นั้นเพื่อปลดบล็อกได้
 /// </summary>
 internal sealed class BlockEnforcer : IDisposable
 {
@@ -28,24 +27,13 @@ internal sealed class BlockEnforcer : IDisposable
 
     public event Action<AlertMsg>? Alert;
 
-    public static string BlocklistPath => Path.Combine(AgentConfig.SharedFolder, "blocklist.json");
-
     public BlockEnforcer()
     {
-        // โหลดรายการที่เคยตั้งไว้ (เผื่อ Agent รีสตาร์ท)
-        try
-        {
-            if (File.Exists(BlocklistPath))
-            {
-                var r = JsonSerializer.Deserialize<BlockRules>(File.ReadAllText(BlocklistPath));
-                if (r is not null) ApplyRules(r);
-            }
-        }
-        catch (Exception ex)
-        {
-            // ถ้าอ่านไฟล์ไม่ได้ = รายการบล็อกที่ผู้ดูแลตั้งไว้หายไปเงียบ ๆ ต้องมีร่องรอยให้ตรวจสอบ
-            Diag.Warn("BlockEnforcer", $"อ่านรายการบล็อกที่ '{BlocklistPath}' ไม่สำเร็จ จึงเริ่มด้วยรายการว่าง", ex);
-        }
+        // ดึงรายการที่ Service เก็บไว้กลับมา (Agent ไม่มีสิทธิ์เขียนไฟล์นี้อีกต่อไป)
+        BlockRules? stored = ServiceClient.GetBlocklist(out string? error);
+        if (stored is not null) ApplyRules(stored);
+        else if (error is not null)
+            Diag.Warn("BlockEnforcer", "ยังดึงรายการบล็อกจากบริการไม่ได้ จะรอรับจาก Master เมื่อเชื่อมต่อ: " + error);
 
         _timer = new System.Threading.Timer(_ => Enforce(), null, 2000, 2000);
     }
@@ -53,17 +41,15 @@ internal sealed class BlockEnforcer : IDisposable
     public void SetRules(BlockRules rules)
     {
         ApplyRules(rules);
-        try
-        {
-            Directory.CreateDirectory(AgentConfig.SharedFolder);
-            File.WriteAllText(BlocklistPath, JsonSerializer.Serialize(rules, new JsonSerializerOptions { WriteIndented = true }));
-        }
-        catch (Exception ex)
-        {
-            // เขียนไม่ได้ = Service มองไม่เห็นรายการเว็บที่ต้องบล็อก และรายการจะหายเมื่อ Agent รีสตาร์ท
-            // การบล็อกโปรแกรมในหน่วยความจำยังทำงาน จึงไม่โยนต่อ แต่ต้องบันทึกให้เห็นว่าเว็บไม่ถูกบล็อก
-            Diag.Error("BlockEnforcer", $"เขียนรายการบล็อกที่ '{BlocklistPath}' ไม่สำเร็จ การบล็อกเว็บผ่าน hosts จะไม่อัปเดต", ex);
-        }
+
+        // ส่งให้ Service ตรวจรูปแบบและเขียนลงที่ที่ผู้ใช้ทั่วไปแก้ไม่ได้ แทนการเขียนไฟล์เอง
+        ControlResponse? response = ServiceClient.SetBlocklist(rules, out string? error);
+        if (response is null)
+            Diag.Error("BlockEnforcer",
+                "ส่งรายการบล็อกให้บริการไม่สำเร็จ การบล็อกเว็บผ่าน hosts จะไม่อัปเดต: " + (error ?? "ไม่ทราบสาเหตุ"));
+        else if (!response.Ok)
+            Diag.Error("BlockEnforcer", "บริการปฏิเสธรายการบล็อก: " + response.Message);
+
         Enforce(); // ปิดโปรแกรมที่ถูกบล็อกทันทีไม่ต้องรอรอบถัดไป
     }
 
@@ -102,7 +88,13 @@ internal sealed class BlockEnforcer : IDisposable
         {
             Process[] procs;
             try { procs = Process.GetProcessesByName(name); }
-            catch { continue; }
+            catch
+            {
+                // จงใจข้าม:ชื่อดูไม่ถูกต้องหรือระบบปฏิเสธการ enumerate ชื่อนี้ ยังบล็อกชื่ออื่นต่อได้
+                // ไม่ใช่ความลับที่หายไป จึงไม่โยนทิ้งทั้งรอบ แต่บันทึกไว้ให้ตรวจสอบว่าบล็อกชื่อนี้ไม่สำเร็จ
+                Diag.Warn("BlockEnforcer.Enforce", $" enumerate โปรเซสชื่อ '{name}' ไม่สำเร็จ ข้ามไปชื่อถัดไป");
+                continue;
+            }
 
             bool killed = false;
             foreach (var p in procs)

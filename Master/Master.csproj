@@ -16,6 +16,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- DPAPI (ProtectedData) เข้ารหัสกุญแจลับของ Master ผูกกับบัญชี Windows ปัจจุบัน -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ให้เทสต์เรียก KeyVault ที่เป็น internal ได้ ไม่เปลี่ยนเป็น public -->
+    <InternalsVisibleTo Include="RainDrop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="..\assets\raindrop.ico" Link="raindrop.ico" />
   </ItemGroup>
 

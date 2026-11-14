@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 
 namespace RainDrop.AgentService;
 
@@ -14,6 +15,41 @@ internal static class SessionLauncher
 
     /// <summary>หมายเลขเซสชันของผู้ใช้ที่นั่งอยู่หน้าเครื่อง (console) ตอนนี้</summary>
     public static uint ActiveConsoleSession => WTSGetActiveConsoleSessionId();
+
+    /// <summary>
+    /// SID ของผู้ใช้ที่ล็อกอินในเซสชันนี้ ใช้ตั้ง ACL ของ named pipe ให้เฉพาะคนนั้นต่อได้
+    /// คืน null พร้อม error เมื่อไม่มีผู้ใช้ล็อกอินหรืออ่านสิทธิ์ไม่ได้ (ผู้เรียกต้องบันทึกเหตุนี้)
+    /// ใช้ WTSQueryUserToken ตัวเดียวกับที่เปิด Agent จึงไม่เพิ่มพื้นผิว API ใหม่
+    /// </summary>
+    public static SecurityIdentifier? SessionUserSid(uint sessionId, out string? error)
+    {
+        error = null;
+        if (!WTSQueryUserToken(sessionId, out IntPtr userToken))
+        {
+            error = new Win32Exception(Marshal.GetLastWin32Error()).Message;
+            return null;
+        }
+
+        try
+        {
+            using var identity = new WindowsIdentity(userToken);
+            if (identity.User is null)
+            {
+                error = "token ของผู้ใช้ไม่มีข้อมูล SID";
+                return null;
+            }
+            return identity.User;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+        finally
+        {
+            CloseHandle(userToken);
+        }
+    }
 
     /// <summary>
     /// เปิด exePath ในเซสชัน sessionId พร้อมตั้ง environment variable เพิ่ม (extraEnv)
