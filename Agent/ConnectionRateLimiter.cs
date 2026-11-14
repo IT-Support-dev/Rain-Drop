@@ -28,7 +28,7 @@ internal sealed class ConnectionRateLimiter
         _connectionsPerMinute = connectionsPerMinute;
         _failuresPerMinute = failuresPerMinute;
         _maxIps = maxIps;
-        _timestamp = timestamp ?? Environment.TickCount64;
+        _timestamp = timestamp ?? (() => Environment.TickCount64);
     }
 
     public bool TryConnect(IPAddress ip)

@@ -122,7 +122,6 @@ internal static class ServiceStore
     public static void SaveBlocklist(BlockRules normalized) =>
         File.WriteAllText(BlocklistPath,
             JsonSerializer.Serialize(normalized, new JsonSerializerOptions { WriteIndented = true }));
-}
 
     /// <summary>Load the endpoint identity. The private key is released only over the PID-checked local pipe.</summary>
     public static (X509Certificate2 Certificate, X509Certificate2 Ca, RevocationList Revocation, RunAllowlist Allowlist)? LoadIdentity(Action<string> log)
@@ -157,3 +156,4 @@ internal static class ServiceStore
         state.Apply(incoming); // rejects rollback before touching the protected file
         File.WriteAllText(RevocationPath, JsonSerializer.Serialize(state.Snapshot()));
     }
+}
