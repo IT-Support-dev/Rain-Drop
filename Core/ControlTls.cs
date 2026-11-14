@@ -4,6 +4,8 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace RainDrop.Shared;
 
+public enum ControlRole { MasterClient, AgentServer }
+
 /// <summary>Application messages carried by the existing Protocol framing after mutual TLS + legacy auth.</summary>
 public static class ControlMessages
 {
