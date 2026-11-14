@@ -20,3 +20,4 @@ builder.Logging.AddEventLog(settings => settings.SourceName = "Rain Drop Agent S
 
 var host = builder.Build();
 host.Run();
+return 0;
