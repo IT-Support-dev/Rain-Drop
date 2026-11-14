@@ -159,7 +159,8 @@ public static class RepoCertificates
                 throw new CryptographicException("Agent certificate and private key do not match");
             var result = agent.CopyWithPrivateKey(key);
             key = null; // Owned by result now.
-            return (result, ca);
+            var caCopy = new X509Certificate2(ca.RawData);
+            return (result, caCopy);
         }
         finally
         {
@@ -185,7 +186,7 @@ public sealed class RevocationState
 {
     private readonly object _gate = new();
     private HashSet<string> _serials = new(StringComparer.OrdinalIgnoreCase);
-    public long Version { get; private set; }
+    public long Version { get; private set; } = 1;
 
     public RevocationState(RevocationList? initial = null)
     {

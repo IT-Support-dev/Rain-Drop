@@ -105,7 +105,8 @@ public class ControlTlsTests : IDisposable
     [Fact]
     public async Task ExpiredCertificate_Rejected()
     {
-        using var expired = IssueWithValidity(_ca, RepoCertificates.ClientAuthOid, DateTime.UtcNow.AddDays(-10), DateTime.UtcNow.AddDays(-1));
+        var caStart = _ca.NotBefore.ToUniversalTime();
+        using var expired = IssueWithValidity(_ca, RepoCertificates.ClientAuthOid, caStart, caStart.AddMinutes(1));
         await ExpectRejectedAsync(expired);
     }
 

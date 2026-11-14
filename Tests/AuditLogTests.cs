@@ -48,7 +48,7 @@ public class AuditLogTests : IDisposable
     [Fact]
     public void Rotation_KeepsFiveFilesAndChainLinksAcrossFiles()
     {
-        using (var log = new AuditLog(_dir, rotateBytes: 1024))
+        using (var log = new AuditLog(_dir, rotateBytes: 4096))
         {
             for (int i = 0; i < 40; i++) log.Append(new AuditEvent("connect", "127.0.0.1", "ok", i.ToString()));
         }
