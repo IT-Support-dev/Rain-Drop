@@ -30,25 +30,28 @@ internal sealed class RemoteForm : Form
 
         Text = $"ควบคุมระยะไกล - {host.Name} ({host.Address})";
         Icon = AppIcon.Load();
-        Size = new Size(1280, 800);
-        StartPosition = FormStartPosition.CenterScreen;
+        Theme.ConfigureForm(this, new Size(800, 500));
+        UiWindowPlacement.Attach(this, "remote-" + host.Name, new Size(1280, 800), new Size(800, 500));
         KeyPreview = true;
-        Font = DiscordTheme.FontUi;
 
-        _pic = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
+        _pic = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
 
-        _controlButton = new ToolStripButton("โหมดควบคุม: ปิด (ดูอย่างเดียว)") { CheckOnClick = true };
+        _controlButton = new ToolStripButton("ดูอย่างเดียว") { CheckOnClick = true, Image = UiIcons.Get(UiIcon.Monitor, Theme.TextSecondary), ToolTipText = "สลับโหมดควบคุมระยะไกล" };
+        _controlButton.AccessibleName = "สลับโหมดควบคุม";
         _controlButton.CheckedChanged += (_, _) =>
-            _controlButton.Text = _controlButton.Checked ? "โหมดควบคุม: เปิด" : "โหมดควบคุม: ปิด (ดูอย่างเดียว)";
+            _controlButton.Text = _controlButton.Checked ? "ควบคุมอยู่" : "ดูอย่างเดียว";
 
         _statusLabel = new ToolStripLabel("กำลังเชื่อมต่อ...") { Alignment = ToolStripItemAlignment.Right };
 
-        var toolbar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden };
+        var toolbar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, BackColor = Theme.Surface, ForeColor = Theme.TextSecondary, Font = Theme.FontBody };
+        Theme.StyleMenu(toolbar);
         toolbar.Items.Add(_controlButton);
         toolbar.Items.Add(new ToolStripSeparator());
-        toolbar.Items.Add(new ToolStripButton("ล็อกเครื่องนี้", null, (_, _) =>
-            _client?.SendJson(MsgType.Lock, new LockCmd("เครื่องนี้ถูกล็อกโดยผู้ดูแลระบบ"))));
-        toolbar.Items.Add(new ToolStripButton("ปลดล็อก", null, (_, _) => _client?.Send(MsgType.Unlock)));
+        var lockItem = new ToolStripButton("ล็อก", null, (_, _) =>
+            _client?.SendJson(MsgType.Lock, new LockCmd("เครื่องนี้ถูกล็อกโดยผู้ดูแลระบบ"))) { Image = UiIcons.Get(UiIcon.Lock, Theme.TextSecondary), ToolTipText = "ล็อกเครื่องนี้" };
+        var unlockItem = new ToolStripButton("ปลดล็อก", null, (_, _) => _client?.Send(MsgType.Unlock)) { Image = UiIcons.Get(UiIcon.Unlock, Theme.TextSecondary), ToolTipText = "ปลดล็อกเครื่องนี้" };
+        toolbar.Items.Add(lockItem);
+        toolbar.Items.Add(unlockItem);
         toolbar.Items.Add(_statusLabel);
 
         Controls.Add(_pic);

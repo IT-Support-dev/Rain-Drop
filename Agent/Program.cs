@@ -322,6 +322,7 @@ internal sealed class AgentContext : ApplicationContext, IAgentHandler
 
         // ผู้ใช้เครื่องลูกเริ่มแชทหาผู้ดูแลได้เอง: ดับเบิลคลิกไอคอน หรือคลิกขวาแล้วเลือกเมนู
         var menu = new ContextMenuStrip();
+        Theme.StyleMenu(menu);
         menu.Items.Add("แชทกับผู้ดูแลระบบ", null, (_, _) => OpenChat());
         menu.Items.Add("เปิดห้องชุมชน (แชท/คอลเสียง)", null, (_, _) => OpenCommunity());
         menu.Items.Add("สถานะการเชื่อมต่อ...", null, (_, _) => ShowStatus());
@@ -353,8 +354,9 @@ internal sealed class AgentContext : ApplicationContext, IAgentHandler
     private void VerifyAudit()
     {
         var result = ServiceClient.VerifyAudit(out string? error);
-        MessageBox.Show(result is null ? (error ?? "ติดต่อ Service ไม่ได้") : result.Ok ? "audit chain ถูกต้อง" : "audit chain ไม่ถูกต้อง: " + result.AuditError,
-            "Rain Drop Audit", MessageBoxButtons.OK, result is { Ok: true } ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        UiDialog.Show(null, "Rain Drop Audit",
+            result is null ? (error ?? "ติดต่อ Service ไม่ได้") : result.Ok ? "audit chain ถูกต้อง" : "audit chain ไม่ถูกต้อง: " + result.AuditError,
+            result is { Ok: true } ? DialogKind.Info : DialogKind.Warning);
     }
 
     public void ReportError(string message) => RunOnUi(() =>
@@ -377,8 +379,7 @@ internal sealed class AgentContext : ApplicationContext, IAgentHandler
         }
         if (_communityFingerprint is null)
         {
-            MessageBox.Show("ยังไม่ได้ติดตั้งกุญแจของชุมชน จึงเข้าห้องชุมชนไม่ได้",
-                "Rain Drop", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            UiDialog.Show(null, "Rain Drop", "ยังไม่ได้ติดตั้งกุญแจของชุมชน จึงเข้าห้องชุมชนไม่ได้", DialogKind.Warning);
             return;
         }
 
@@ -422,14 +423,12 @@ internal sealed class AgentContext : ApplicationContext, IAgentHandler
         ControlResponse? response = ServiceClient.RequestStop(values[0], out string? error);
         if (response is null)
         {
-            MessageBox.Show(error ?? "ติดต่อบริการไม่ได้", "Rain Drop Agent",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            UiDialog.Show(null, "Rain Drop Agent", error ?? "ติดต่อบริการไม่ได้", DialogKind.Warning);
             return;
         }
         if (!response.Ok)
         {
-            MessageBox.Show(response.Message, "Rain Drop Agent",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            UiDialog.Show(null, "Rain Drop Agent", response.Message, DialogKind.Error);
             return;
         }
 
@@ -448,16 +447,15 @@ internal sealed class AgentContext : ApplicationContext, IAgentHandler
             .ToList();
         var masters = _server.ConnectedMasters;
 
-        string text =
-            $"ชื่อเครื่อง:  {Environment.MachineName}\n" +
-            $"IP ของเครื่องนี้:  {(ips.Count > 0 ? string.Join(", ", ips) : "ไม่พบ (ไม่ได้ต่อเครือข่าย)")}\n" +
-            $"พอร์ต:  {_server.Port}  " + (_server.StartError is null ? "(รอการเชื่อมต่ออยู่)" : "\n   ✖ " + _server.StartError) + "\n\n" +
-            (_server.HasPublicKey
-                ? $"กุญแจของ Master:  ✔ พบ\nลายนิ้วมือกุญแจ:  {_server.KeyFingerprint}\n(ต้องตรงกับที่แสดงใน Master → ตั้งค่า / กุญแจ)\n\n"
-                : $"กุญแจของ Master:  ✖ ไม่พบไฟล์\n{AgentConfig.PublicKeyPath}\n\n") +
-            $"Master ที่เชื่อมต่ออยู่:  {(masters.Count > 0 ? string.Join(", ", masters) : "ยังไม่มี")}";
-
-        MessageBox.Show(text, "Rain Drop Agent - สถานะการเชื่อมต่อ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        string keyState = _server.HasPublicKey
+            ? $"พบ (ลายนิ้วมือ {_server.KeyFingerprint})"
+            : $"ไม่พบไฟล์ {AgentConfig.PublicKeyPath}";
+        using var form = new StatusForm(Environment.MachineName,
+            ips.Count > 0 ? string.Join(", ", ips) : "ไม่พบ (ไม่ได้ต่อเครือข่าย)",
+            _server.Port.ToString(), keyState,
+            masters.Count > 0 ? string.Join(", ", masters) : "ยังไม่มี",
+            _server.StartError);
+        form.ShowDialog();
     }
 
     public void RunOnUi(Action action)
@@ -524,8 +522,7 @@ internal sealed class AgentContext : ApplicationContext, IAgentHandler
     });
 
     public void ShowMessage(string title, string text) => RunOnUi(() =>
-        MessageBox.Show(text, title, MessageBoxButtons.OK, MessageBoxIcon.Information,
-            MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly));
+        UiDialog.Show(null, title, text));
 
     protected override void Dispose(bool disposing)
     {

@@ -19,4 +19,10 @@
     <ProjectReference Include="..\Core\Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="RainDrop.Master" />
+    <InternalsVisibleTo Include="RainDrop.Agent" />
+    <InternalsVisibleTo Include="RainDrop.Tests" />
+  </ItemGroup>
+
 </Project>

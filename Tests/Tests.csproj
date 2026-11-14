@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Core\Core.csproj" />
+    <ProjectReference Include="..\Shared\Shared.csproj" />
     <ProjectReference Include="..\Agent\Agent.csproj" />
     <ProjectReference Include="..\AgentService\AgentService.csproj" />
     <ProjectReference Include="..\Master\Master.csproj" />

@@ -64,7 +64,7 @@ internal static class Program
             catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
         }
 
-        Application.SetHighDpiMode(HighDpiMode.SystemAware);
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new MainForm());
