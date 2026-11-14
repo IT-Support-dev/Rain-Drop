@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RainDrop.Shared</AssemblyName>
+    <RootNamespace>RainDrop.Shared</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ใช้สำหรับคอลเสียงสด (จับไมโครโฟน + เล่นเสียงหลายคนพร้อมกัน) -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+</Project>

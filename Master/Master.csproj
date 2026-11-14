@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RainDrop.Master</AssemblyName>
+    <RootNamespace>RainDrop.Master</RootNamespace>
+    <ApplicationIcon>..\assets\raindrop.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared\Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\assets\raindrop.ico" Link="raindrop.ico" />
+  </ItemGroup>
+
+</Project>

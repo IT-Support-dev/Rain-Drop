@@ -1,0 +1,235 @@
+using System.Net.Sockets;
+using System.Threading.Channels;
+using RainDrop.Shared;
+
+namespace RainDrop.Master;
+
+/// <summary>
+/// การเชื่อมต่อไปยัง Agent หนึ่งเครื่อง
+/// - การเขียนทั้งหมดผ่านคิว (Channel) ตัวเดียว เพื่อให้ลำดับคำสั่ง เมาส์/คีย์บอร์ด ไม่สลับกัน
+/// - มีตัวอ่าน (reader loop) ทำงานตลอดเวลา แยกข้อมูลที่เข้ามาเป็น
+///     ScreenFrame  -> ส่งให้คำขอภาพที่รออยู่
+///     ChatMessage  -> ยิง event ChatReceived (Agent ส่งมาเองได้ทุกเมื่อ)
+///     VoiceMessage -> ยิง event VoiceReceived
+/// </summary>
+internal sealed class AgentClient : IDisposable
+{
+    private readonly TcpClient _tcp;
+    private readonly NetworkStream _stream;
+    private readonly Channel<(MsgType Type, byte[] Payload)> _outbox =
+        Channel.CreateUnbounded<(MsgType, byte[])>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly SemaphoreSlim _screenLock = new(1, 1);
+    private readonly CancellationTokenSource _cts = new();
+    private volatile TaskCompletionSource<byte[]>? _pendingFrame;
+
+    public bool IsConnected { get; private set; }
+
+    /// <summary>ถูกเรียกบน thread pool ผู้ใช้ต้องสลับกลับไปยัง UI thread เอง</summary>
+    public event Action<ChatMsg>? ChatReceived;
+
+    /// <summary>ถูกเรียกบน thread pool เหมือน ChatReceived</summary>
+    public event Action<VoiceMsg>? VoiceReceived;
+
+    /// <summary>แจ้งเตือนจากเครื่องลูก (USB/ไฟล์/บล็อกโปรแกรม) ถูกเรียกบน thread pool</summary>
+    public event Action<AlertMsg>? AlertReceived;
+
+    private AgentClient(TcpClient tcp)
+    {
+        _tcp = tcp;
+        _stream = tcp.GetStream();
+        IsConnected = true;
+        _ = Task.Run(WriterLoopAsync);
+        _ = Task.Run(ReaderLoopAsync);
+    }
+
+    public static async Task<AgentClient> ConnectAsync(string host, int port, MasterKey key, CancellationToken ct = default)
+    {
+        var tcp = new TcpClient { NoDelay = true };
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            await tcp.ConnectAsync(host, port, cts.Token).ConfigureAwait(false);
+            var stream = tcp.GetStream();
+
+            var (type, nonce) = await Protocol.ReadAsync(stream, cts.Token).ConfigureAwait(false);
+            if (type != MsgType.AuthChallenge || nonce.Length != 32)
+                throw new InvalidDataException("ไม่ใช่ Rain Drop Agent");
+
+            await Protocol.WriteAsync(stream, MsgType.AuthResponse, key.Sign(nonce), cts.Token).ConfigureAwait(false);
+
+            var (resultType, result) = await Protocol.ReadAsync(stream, cts.Token).ConfigureAwait(false);
+            if (resultType != MsgType.AuthResult || result.Length != 1 || result[0] != 1)
+                throw new UnauthorizedAccessException(
+                    $"กุญแจไม่ตรงกัน: ติดตั้งเครื่องลูกใหม่ด้วย Agent Setup ที่ build ชุดเดียวกับ Master (ลายนิ้วมือ Master: {key.Fingerprint})");
+
+            return new AgentClient(tcp);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            tcp.Dispose();
+            throw new TimeoutException("หมดเวลา: IP ผิด, เครื่องปิดอยู่ หรือไฟร์วอลล์ของเครื่องลูกบล็อกพอร์ต " + port);
+        }
+        catch (SocketException ex)
+        {
+            tcp.Dispose();
+            throw new IOException(ex.SocketErrorCode switch
+            {
+                SocketError.ConnectionRefused => "เครื่องลูกปฏิเสธการเชื่อมต่อ: Agent ไม่ได้ทำงาน (ไม่มีไอคอนโล่)",
+                SocketError.HostNotFound or SocketError.NoData => "ไม่พบชื่อเครื่องนี้ในเครือข่าย ลองใส่เป็น IP แทน",
+                SocketError.HostUnreachable or SocketError.NetworkUnreachable => "ติดต่อเครื่องนี้ไม่ได้: อยู่คนละวงเครือข่าย",
+                SocketError.TimedOut => "หมดเวลา: IP ผิด, เครื่องปิดอยู่ หรือไฟร์วอลล์บล็อก",
+                _ => ex.Message,
+            });
+        }
+        catch
+        {
+            tcp.Dispose();
+            throw;
+        }
+    }
+
+    private async Task WriterLoopAsync()
+    {
+        try
+        {
+            await foreach (var (type, payload) in _outbox.Reader.ReadAllAsync(_cts.Token).ConfigureAwait(false))
+                await Protocol.WriteAsync(_stream, type, payload, _cts.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            // เขียนไม่สำเร็จ = การเชื่อมต่อขาด
+        }
+        finally
+        {
+            MarkDisconnected();
+        }
+    }
+
+    private async Task ReaderLoopAsync()
+    {
+        try
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                var (type, payload) = await Protocol.ReadAsync(_stream, _cts.Token).ConfigureAwait(false);
+                switch (type)
+                {
+                    case MsgType.ScreenFrame:
+                        _pendingFrame?.TrySetResult(payload);
+                        break;
+
+                    case MsgType.ChatMessage:
+                        try { ChatReceived?.Invoke(Protocol.FromJson<ChatMsg>(payload)); }
+                        catch { /* ข้อความผิดรูปแบบ หรือผู้รับ event มีปัญหา: ข้ามไป */ }
+                        break;
+
+                    case MsgType.VoiceMessage:
+                        try { VoiceReceived?.Invoke(Protocol.FromJson<VoiceMsg>(payload)); }
+                        catch { /* ข้ามไป */ }
+                        break;
+
+                    case MsgType.ActivitySnapshot:
+                        _pendingActivity?.TrySetResult(payload);
+                        break;
+
+                    case MsgType.Alert:
+                        try { AlertReceived?.Invoke(Protocol.FromJson<AlertMsg>(payload)); }
+                        catch { /* ข้ามไป */ }
+                        break;
+                }
+            }
+        }
+        catch
+        {
+            // อ่านไม่สำเร็จ = การเชื่อมต่อขาด
+        }
+        finally
+        {
+            MarkDisconnected();
+        }
+    }
+
+    private void MarkDisconnected()
+    {
+        IsConnected = false;
+        _pendingFrame?.TrySetException(new IOException("ขาดการเชื่อมต่อ"));
+        _pendingActivity?.TrySetException(new IOException("ขาดการเชื่อมต่อ"));
+    }
+
+    private readonly SemaphoreSlim _activityLock = new(1, 1);
+    private volatile TaskCompletionSource<byte[]>? _pendingActivity;
+
+    /// <summary>ขอสรุปกิจกรรมล่าสุดจากเครื่องลูก</summary>
+    public async Task<ActivitySnapshot> RequestActivityAsync(CancellationToken ct = default)
+    {
+        await _activityLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingActivity = tcs;
+            if (!IsConnected) throw new IOException("ขาดการเชื่อมต่อ");
+
+            Send(MsgType.ActivityRequest);
+            byte[] json = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+            return Protocol.FromJson<ActivitySnapshot>(json);
+        }
+        finally
+        {
+            _pendingActivity = null;
+            _activityLock.Release();
+        }
+    }
+
+    public void Send(MsgType type, byte[]? payload = null)
+    {
+        if (IsConnected) _outbox.Writer.TryWrite((type, payload ?? Array.Empty<byte>()));
+    }
+
+    public void SendJson<T>(MsgType type, T obj) => Send(type, Protocol.ToJson(obj));
+
+    /// <summary>ส่งรายการบล็อกโปรแกรม/เว็บไปยังเครื่องลูก</summary>
+    public void SendBlocklist(BlockRules rules) => SendJson(MsgType.SetBlocklist, rules);
+
+    public async Task<Bitmap> RequestScreenAsync(int maxWidth, int quality, CancellationToken ct = default)
+    {
+        await _screenLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingFrame = tcs;
+            if (!IsConnected) throw new IOException("ขาดการเชื่อมต่อ");
+
+            SendJson(MsgType.ScreenRequest, new ScreenRequest(maxWidth, quality));
+
+            byte[] jpeg;
+            try
+            {
+                jpeg = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                Dispose(); // Agent ไม่ตอบ: ถือว่าการเชื่อมต่อนี้ใช้ไม่ได้แล้ว
+                throw new IOException("Agent ไม่ตอบสนอง");
+            }
+
+            using var ms = new MemoryStream(jpeg);
+            using var img = Image.FromStream(ms);
+            return new Bitmap(img);
+        }
+        finally
+        {
+            _pendingFrame = null;
+            _screenLock.Release();
+        }
+    }
+
+    public void Dispose()
+    {
+        IsConnected = false;
+        _cts.Cancel();
+        _outbox.Writer.TryComplete();
+        _tcp.Dispose();
+    }
+}

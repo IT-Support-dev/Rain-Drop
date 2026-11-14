@@ -1,0 +1,7 @@
+bin/
+obj/
+publish/
+.vs/
+master-private.pem
+keys/
+installer-output/

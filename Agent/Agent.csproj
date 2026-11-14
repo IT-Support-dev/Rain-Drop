@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RainDrop.Agent</AssemblyName>
+    <RootNamespace>RainDrop.Agent</RootNamespace>
+    <ApplicationIcon>..\assets\raindrop.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared\Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ฝังไอคอนไว้ในโปรแกรม เพื่อโหลดใช้กับ NotifyIcon ได้โดยไม่ต้องมีไฟล์ .ico แยก -->
+    <EmbeddedResource Include="..\assets\raindrop.ico" Link="raindrop.ico" />
+  </ItemGroup>
+
+</Project>
