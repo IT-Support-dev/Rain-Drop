@@ -41,8 +41,8 @@ public class ThemeTests
     [Fact]
     public void Mix_ClampsAndInterpolates()
     {
-        Assert.Equal(Color.Black, Theme.Mix(Color.Black, Color.White, -1));
-        Assert.Equal(Color.White, Theme.Mix(Color.Black, Color.White, 2));
+        Assert.Equal(Color.Black.ToArgb(), Theme.Mix(Color.Black, Color.White, -1).ToArgb());
+        Assert.Equal(Color.White.ToArgb(), Theme.Mix(Color.Black, Color.White, 2).ToArgb());
         var mid = Theme.Mix(Color.Black, Color.White, 0.5);
         Assert.Equal(128, mid.R);
     }
