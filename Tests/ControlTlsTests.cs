@@ -147,8 +147,9 @@ public class ControlTlsTests : IDisposable
     {
         var handler = new FakeHandler();
         var revoked = new RevocationState();
+        var audits = new System.Collections.Concurrent.ConcurrentQueue<string>();
         var security = new AgentSecurity(_agent, new X509Certificate2(_ca.RawData), revoked.Snapshot(),
-            new RunAllowlist(new List<string>()), _ => true, _ => true);
+            new RunAllowlist(new List<string>()), e => { audits.Enqueue(e.Event + ":" + e.Detail); return true; }, _ => true);
         var server = new AgentServer(0, _challenge, handler, security, discovery: false);
         Task run = server.RunAsync();
         try
@@ -156,8 +157,14 @@ public class ControlTlsTests : IDisposable
             int port = await WaitPort(server);
             using var tcp = new TcpClient();
             await tcp.ConnectAsync(IPAddress.Loopback, port);
-            using var ssl = await ControlTls.AuthenticateClientAsync(tcp.GetStream(), "127.0.0.1", _client,
-                new ControlTlsPolicy(_caPublic, new RevocationState(), ControlRole.AgentServer), CancellationToken.None);
+            SslStream ssl;
+            try
+            {
+                ssl = await ControlTls.AuthenticateClientAsync(tcp.GetStream(), "127.0.0.1", _client,
+                    new ControlTlsPolicy(_caPublic, new RevocationState(), ControlRole.AgentServer), CancellationToken.None);
+            }
+            catch (Exception ex) { throw new Exception(ex.Message + " | server-audit=" + string.Join(",", audits), ex); }
+            using var sslScope = ssl;
             var (type, nonce) = await Protocol.ReadAsync(ssl);
             Assert.Equal(MsgType.AuthChallenge, type);
             await Protocol.WriteAsync(ssl, MsgType.AuthResponse, Protocol.Sign(_challenge, nonce));
