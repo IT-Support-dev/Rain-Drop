@@ -1,6 +1,7 @@
 using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography;
+using System.Security.Cryptography.Pkcs;
 using System.Security.Cryptography.X509Certificates;
 
 namespace RainDrop.Shared;
@@ -36,7 +37,14 @@ public static class ControlTls
     {
         if (!OperatingSystem.IsWindows()) return new X509Certificate2(source.RawData).CopyWithPrivateKey(source.GetECDsaPrivateKey()!);
         string password = Guid.NewGuid().ToString("N");
-        byte[] pfx = source.Export(X509ContentType.Pfx, password);
+        var key = source.GetECDsaPrivateKey() ?? throw new CryptographicException("TLS certificate has no ECDSA private key");
+        var contents = new Pkcs12SafeContents();
+        contents.AddCertificate(source);
+        contents.AddShroudedKey(key, password, new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, 1000));
+        var builder = new Pkcs12Builder();
+        builder.AddSafeContentsUnencrypted(contents);
+        builder.SealWithMac(password, HashAlgorithmName.SHA256, 1000);
+        byte[] pfx = builder.Encode();
         try { return new X509Certificate2(pfx, password, X509KeyStorageFlags.DefaultKeySet | X509KeyStorageFlags.Exportable); }
         finally { Array.Clear(pfx); }
     }
@@ -46,9 +54,9 @@ public static class ControlTls
     {
         var ssl = new SslStream(inner, false);
         string reason = "handshake-failed";
-        using var local = CreateSchannelCertificate(certificate);
         try
         {
+            using var local = CreateSchannelCertificate(certificate);
             var options = new SslServerAuthenticationOptions
             {
                 ServerCertificate = local,
@@ -70,7 +78,7 @@ public static class ControlTls
                 throw new ControlTlsException(reason);
             return ssl;
         }
-        catch (Exception ex) when (ex is AuthenticationException or IOException or OperationCanceledException)
+        catch (Exception ex) when (ex is AuthenticationException or IOException or OperationCanceledException or CryptographicException)
         {
             await ssl.DisposeAsync().ConfigureAwait(false);
             throw new ControlTlsException(ex is ControlTlsException tex ? tex.Reason : reason, ex);
@@ -82,9 +90,9 @@ public static class ControlTls
     {
         var ssl = new SslStream(inner, false);
         string reason = "handshake-failed";
-        using var local = CreateSchannelCertificate(certificate);
         try
         {
+            using var local = CreateSchannelCertificate(certificate);
             var options = new SslClientAuthenticationOptions
             {
                 TargetHost = targetHost,
@@ -108,7 +116,7 @@ public static class ControlTls
                 throw new ControlTlsException(reason);
             return ssl;
         }
-        catch (Exception ex) when (ex is AuthenticationException or IOException or OperationCanceledException)
+        catch (Exception ex) when (ex is AuthenticationException or IOException or OperationCanceledException or CryptographicException)
         {
             await ssl.DisposeAsync().ConfigureAwait(false);
             throw new ControlTlsException(ex is ControlTlsException tex ? tex.Reason : reason, ex);
