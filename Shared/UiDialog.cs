@@ -6,7 +6,7 @@ internal enum DialogKind { Info, Warning, Error, Question }
 internal static class UiDialog
 {
     internal static void Show(IWin32Window? owner, string title, string message, DialogKind kind = DialogKind.Info) =>
-        ShowCore(owner, title, message, kind, null, null, out _, out _);
+        ShowCore(owner, title, message, kind, null, 0, out _, out _);
 
     internal static bool Confirm(IWin32Window? owner, string title, string message, string confirmText = "ยืนยัน", bool danger = false)
     {
@@ -27,7 +27,7 @@ internal static class UiDialog
         (string Text, ButtonKind Kind)[]? buttons, int cancelIndex, out int clicked, out string[]? values,
         (string Label, string Value, bool Secret)[]? fields = null)
     {
-        clicked = cancelIndex;
+        int selected = cancelIndex;
         values = null;
         using var form = new Form();
         Theme.ConfigureForm(form, new Size(420, 200));
@@ -79,7 +79,7 @@ internal static class UiDialog
             int index = i;
             var (text, buttonKind) = buttons[i];
             var button = new UiButton(text, buttonKind) { Width = 112, Height = Theme.ButtonHeightLarge };
-            button.Click += (_, _) => { clicked = index; form.DialogResult = index == cancelIndex ? DialogResult.Cancel : DialogResult.OK; form.Close(); };
+            button.Click += (_, _) => { selected = index; form.DialogResult = index == cancelIndex ? DialogResult.Cancel : DialogResult.OK; form.Close(); };
             actions.Controls.Add(button);
             if (i == 0) form.AcceptButton = button;
             if (i == cancelIndex) form.CancelButton = button;
@@ -88,6 +88,7 @@ internal static class UiDialog
         form.Controls.Add(layout);
         if (boxes.Count > 0) form.Shown += (_, _) => boxes[0].Focus();
         form.ShowDialog(owner);
+        clicked = selected;
         if (fields is not null)
             values = boxes.Select((b, i) => fields[i].Secret ? b.Text : b.Text.Trim()).ToArray();
     }
