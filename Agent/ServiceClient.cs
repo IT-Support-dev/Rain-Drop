@@ -79,6 +79,27 @@ internal static class ServiceClient
         return new BlockRules(response.Programs ?? new List<string>(), response.Urls ?? new List<string>());
     }
 
+
+    /// <summary>ขอ identity จาก Service เฉพาะโปรเซส Agent ที่ Service เปิด (ตรวจ PID ที่ปลายท่อ)</summary>
+    public static ControlResponse? GetIdentity(out string? error) =>
+        Send(new ControlRequest(ControlChannel.OpGetIdentity), out error);
+
+    public static bool Audit(string eventName, string ip, string result, string detail, out string? error)
+    {
+        var response = Send(new ControlRequest(ControlChannel.OpAudit, null, null, null,
+            eventName, ip, result, detail), out error);
+        return response is { Ok: true };
+    }
+
+    public static bool SaveRevocation(string json, out string? error)
+    {
+        var response = Send(new ControlRequest(ControlChannel.OpSaveRevocation, RevocationJson: json), out error);
+        return response is { Ok: true };
+    }
+
+    public static ControlResponse? VerifyAudit(out string? error) =>
+        Send(new ControlRequest(ControlChannel.OpVerifyAudit), out error);
+
     private static string? ReadLineBounded(Stream pipe)
     {
         using var accumulated = new MemoryStream();

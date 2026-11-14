@@ -31,15 +31,17 @@ internal sealed class ControlPipeServer
     private readonly Action _onAuthorizedStop;
     private readonly Func<int> _agentPid;
     private readonly Action _syncHosts;
+    private readonly AuditLog _audit;
 
     public ControlPipeServer(PasswordGate gate, Action<string> log, Action onAuthorizedStop,
-        Func<int> agentPid, Action syncHosts)
+        Func<int> agentPid, Action syncHosts, AuditLog audit)
     {
         _gate = gate;
         _log = log;
         _onAuthorizedStop = onAuthorizedStop;
         _agentPid = agentPid;
         _syncHosts = syncHosts;
+        _audit = audit;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -199,10 +201,64 @@ internal sealed class ControlPipeServer
                 return new ControlResponse(true, "ok", 0, rules.Programs, rules.Urls);
             }
 
+            case ControlChannel.OpGetIdentity:
+            {
+                if (!IsTrustedAgent(clientPid)) return DeniedIdentity();
+                var identity = ServiceStore.LoadIdentity(_log);
+                if (identity is null) return DeniedIdentity();
+                var (cert, ca, revocation, allowlist) = identity.Value;
+                using (cert) using (ca)
+                    return new ControlResponse(true, "ok", 0, null, null,
+                        Convert.ToBase64String(cert.RawData),
+                        Convert.ToBase64String(cert.GetECDsaPrivateKey()!.ExportPkcs8PrivateKey()),
+                        Convert.ToBase64String(ca.RawData),
+                        JsonSerializer.Serialize(revocation), JsonSerializer.Serialize(allowlist));
+            }
+            case ControlChannel.OpAudit:
+            {
+                if (!IsTrustedAgent(clientPid)) return new ControlResponse(false, "คำขอนี้รับเฉพาะ Agent ของบริการ");
+                if (request.Event is null || request.Ip is null || request.Result is null)
+                    return new ControlResponse(false, "ข้อมูล audit ไม่ครบ");
+                try
+                {
+                    _audit.Append(new AuditEvent(request.Event, request.Ip, request.Result, request.Detail ?? ""));
+                    return new ControlResponse(true, "ok");
+                }
+                catch (Exception ex) when (ex is IOException or ArgumentException)
+                {
+                    _log("เขียน audit ไม่สำเร็จ คำสั่งจากเครือข่ายจะถูกปฏิเสธ");
+                    return new ControlResponse(false, "audit-unavailable");
+                }
+            }
+            case ControlChannel.OpSaveRevocation:
+            {
+                if (!IsTrustedAgent(clientPid)) return new ControlResponse(false, "คำขอนี้รับเฉพาะ Agent ของบริการ");
+                try
+                {
+                    var list = JsonSerializer.Deserialize<RevocationList>(request.RevocationJson ?? "")
+                        ?? throw new InvalidDataException("Empty revocation snapshot");
+                    ServiceStore.SaveRevocation(list);
+                    return new ControlResponse(true, "ok");
+                }
+                catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
+                {
+                    _log("บันทึกรายการเพิกถอนไม่สำเร็จ: " + ex.GetType().Name);
+                    return new ControlResponse(false, "revocation-rejected");
+                }
+            }
+            case ControlChannel.OpVerifyAudit:
+            {
+                if (!IsTrustedAgent(clientPid)) return new ControlResponse(false, "คำขอนี้รับเฉพาะ Agent ของบริการ");
+                var result = AuditLog.Verify(ServiceStore.AuditFolder);
+                return new ControlResponse(result.Valid, result.Valid ? "ok" : "audit-invalid", 0, null, null,
+                    null, null, null, null, null, result.Valid, result.Error);
+            }
             default:
                 return new ControlResponse(false, "ไม่รู้จักคำสั่ง");
         }
     }
+
+    private static ControlResponse DeniedIdentity() => new(false, "ยังไม่มี identity ที่ถูกต้องหรือคำขอไม่ได้มาจาก Agent ของบริการ");
 
     private bool IsTrustedAgent(uint clientPid)
     {

@@ -8,3 +8,7 @@ installer-output/
 # secrets / keys (ต้องหมุนกุญแจหากเคยหลุดเข้า git)
 keys/
 *.pem
+*.pfx
+*.p12
+*.rdrop
+*.dpapi

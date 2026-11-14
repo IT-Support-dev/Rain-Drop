@@ -13,6 +13,7 @@ internal sealed class HostTile : UserControl
     private readonly Label _label;
     private readonly MasterSettings _settings;
     private readonly MasterKey _key;
+    private readonly MasterPki _pki;
     private readonly CancellationTokenSource _cts = new();
     private AgentClient? _client;
     private bool _selected;
@@ -71,11 +72,12 @@ internal sealed class HostTile : UserControl
         _selected ? DiscordTheme.Blurple :
         Color.FromArgb(43, 45, 49);
 
-    public HostTile(HostEntry host, MasterSettings settings, MasterKey key)
+    public HostTile(HostEntry host, MasterSettings settings, MasterKey key, MasterPki pki)
     {
         Host = host;
         _settings = settings;
         _key = key;
+        _pki = pki;
 
         Size = new Size(340, 230);
         Margin = new Padding(6);
@@ -120,7 +122,7 @@ internal sealed class HostTile : UserControl
                     _client = null;
                     SetStatus("กำลังเชื่อมต่อ...", Color.Gold);
                     var (host, port) = Host.Resolve(_settings.Port);
-                    _client = await AgentClient.ConnectAsync(host, port, _key, token);
+                    _client = await AgentClient.ConnectAsync(host, port, _key, _pki, Host.Name, token);
                     _client.ChatReceived += msg =>
                     {
                         if (IsHandleCreated && !IsDisposed)

@@ -72,34 +72,35 @@
 | ไฟล์ | ติดตั้งที่ | หมายเหตุ |
 |---|---|---|
 | `RainDrop-Master-Setup.exe` | เครื่องผู้ดูแล | ไม่มีกุญแจฝังอยู่ Master สร้างกุญแจเองตอนเปิดครั้งแรก |
-| `RainDrop-Agent-Setup.exe` | เครื่องลูกทุกเครื่อง | ไม่ฝังกุญแจ ผู้ติดตั้งเลือก `master-public.pem` และตั้งรหัสผ่านเองตอนติดตั้ง |
+| `RainDrop-Agent-Setup.exe` | เครื่องลูกทุกเครื่อง | ไม่ฝังกุญแจ ผู้ติดตั้งเลือก enrollment bundle (`.rdrop`) เฉพาะเครื่อง ใส่รหัส bundle และตั้งรหัสผู้ดูแล |
 
-สคริปต์ build **ไม่สร้างหรือฝังกุญแจลับอีกต่อไป** (เฟส C1).Master จะสร้างคู่กุญแจเองตอนเปิดครั้งแรก
-เก็บกุญแจลับเข้ารหัสด้วย DPAPI (CurrentUser) ที่ `%AppData%\RainDrop\master-private.dpapi`
-และส่งออกกุญแจสาธารณะที่ `%AppData%\RainDrop\master-public.pem`
+สคริปต์ build **ไม่สร้างหรือฝังกุญแจลับ** Master สร้างกุญแจเองตอนเปิดครั้งแรกและเก็บเข้ารหัส DPAPI (CurrentUser)
+ที่ `%AppData%\RainDrop` ได้แก่ `master-private.dpapi` (กุญแจ challenge C1), `ca-private.dpapi` (CA ขององค์กร),
+`master-client-private.dpapi` (ใบรับรอง client ของ Master) และ `pki-state.dpapi` (ทะเบียนเครื่อง/รายการเพิกถอน)
 
-การเตรียมกุญแจสาธารณะสำหรับติดตั้งเครื่องลูกและสำหรับ Hub:
-1. เปิด Master ครั้งแรก (สร้างกุญแจอัตโนมัติ)
-2. รัน `RainDrop.Master.exe --export-public-key <โฟลเดอร์>` เพื่อคัดลอกเฉพาะกุญแจสาธารณะออกมา
-   หรือเปิดโฟลเดอร์ `%AppData%\RainDrop` แล้วคัดลอก `master-public.pem` เอง
-3. ตอนติดตั้งเครื่องลูก เลือกไฟล์ `master-public.pem` นี้ในหน้าตัวติดตั้ง (หรือส่ง `/PUBLICKEY=` ในโหมดเงียบ)
-4. สำหรับ Hub: วางกุญแจสาธารณะที่ `keys\master-public.pem` ก่อนรัน `build-installer.bat`
-   สคริปต์จะคัดลอกเป็น `publish\Hub\hub-key.pem` ให้ (ถ้าไม่พบ จะข้ามและแจ้งวิธีเตรียม)
+การเตรียมเครื่องลูกแบบ C2a (ใช้ enrollment bundle แทน `master-public.pem`):
+1. เปิด Master ครั้งแรก (สร้าง CA อายุ 10 ปี และใบรับรอง Master อัตโนมัติ)
+2. เมนู **เพิ่มเติม → ส่งออก enrollment bundle** ใส่ชื่อเครื่องลูกให้ตรงกับชื่อ Windows, IP/ชื่อโฮสต์ที่ใช้เชื่อมต่อ
+   และรหัส bundle อย่างน้อย 12 ตัวอักษร จะได้ไฟล์ `.rdrop` เฉพาะเครื่องนั้น
+   หรือใช้ CLI: `RainDrop.Master.exe --export-enrollment <ชื่อเครื่อง> <IP คั่นด้วยจุลภาค> <ไฟล์.rdrop>`
+3. ตอนติดตั้ง Agent เลือกไฟล์ `.rdrop` และใส่รหัส bundle (หรือส่ง `/BUNDLE=` และ `/BUNDLEPASSWORD=` ในโหมดเงียบ)
+4. สำหรับ Hub (ยังไม่อยู่ใน C2a): ยังใช้ `master-public.pem` เดิม วางที่ `keys\master-public.pem` ก่อน build
+   สคริปต์จะคัดลอกเป็น `publish\Hub\hub-key.pem` ให้ถ้าพบ
 
-> **สำรอง `%AppData%\RainDrop\master-private.dpapi` ไว้ในที่ปลอดภัย** กุญแจนี้ถอดรหัสได้เฉพาะบัญชี Windows เดิมบนเครื่องเดิม
-> ถ้าหายหรือย้ายเครื่อง ต้องสร้างกุญแจใหม่และติดตั้งเครื่องลูกใหม่ทุกเครื่อง
+> **สำรองโฟลเดอร์ `%AppData%\RainDrop` ไว้ในที่ปลอดภัย** ไฟล์ `.dpapi` ถอดรหัสได้เฉพาะบัญชี Windows เดิมบนเครื่องเดิม
+> ถ้า CA หาย ต้องสร้างใหม่และ enroll เครื่องลูกใหม่ทั้งหมด
 
 ### ติดตั้ง
 
 - **เครื่องผู้ดูแล:** ดับเบิลคลิก `RainDrop-Master-Setup.exe` แล้วกด Next ไปจนจบ เปิดโปรแกรมแล้ว**เครื่องลูกในวงแลนเดียวกันจะขึ้นมาเองภายในไม่กี่วินาที**
   (ค้นหาซ้ำทุก 30 วินาที เครื่องที่เพิ่งติดตั้งก็จะขึ้นมาเอง และถ้า IP ของเครื่องลูกเปลี่ยน ระบบจะอัปเดตให้)
 - **เครื่องลูก:** ดับเบิลคลิก `RainDrop-Agent-Setup.exe` แล้วกด Install ตัวติดตั้งจะบังคับให้
-  **ตั้งรหัสผ่านผู้ดูแล (อย่างน้อย 8 ตัวอักษร ไม่มีค่าเริ่มต้น)** และ **เลือกไฟล์ `master-public.pem`** ที่ได้จากเครื่อง Master
+  **ตั้งรหัสผ่านผู้ดูแล (อย่างน้อย 8 ตัวอักษร ไม่มีค่าเริ่มต้น)** และ **เลือกไฟล์ `.rdrop` พร้อมรหัส bundle** ที่ได้จากเครื่อง Master
   จากนั้นติดตั้ง ตั้งค่าไฟร์วอลล์ (ทุกประเภทเครือข่าย) ตั้งให้เปิดอัตโนมัติ และเริ่มทำงานทันที (จะเห็นไอคอนรูปโล่ที่มุมขวาล่าง)
 - **ติดตั้งหลายเครื่องพร้อมกันแบบไม่มีหน้าต่าง** (ใช้กับ Group Policy, PDQ Deploy, Intune หรือสคริปต์)
-  ต้องส่งทั้ง `/PASSWORD=` และ `/PUBLICKEY=` มิฉะนั้นตัวติดตั้งจะล้มเหลวทันที:
+  ต้องส่ง `/PASSWORD=`, `/BUNDLE=` และ `/BUNDLEPASSWORD=` มิฉะนั้นตัวติดตั้งจะล้มเหลวทันที:
   ```
-  RainDrop-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PASSWORD=MyStrongPass123 /PUBLICKEY=C:\deploy\master-public.pem
+  RainDrop-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PASSWORD=MyStrongPass123 /BUNDLE=C:\deploy\PC-01.rdrop /BUNDLEPASSWORD=MyBundlePass12
   ```
 - **ถอนการติดตั้ง:** Settings → Apps → Installed apps → Rain Drop Agent / Rain Drop Master → Uninstall
 
@@ -140,18 +141,14 @@ CI (`.github/workflows/ci.yml`) รันสองคำสั่งนี้บ
 
 ## ติดตั้งเองแบบไม่ใช้ตัวติดตั้ง
 
-1. **เปิด Master ครั้งแรก** ที่เครื่องผู้ดูแล โปรแกรมจะสร้างคู่กุญแจใน `%AppData%\RainDrop`:
-   - `master-private.dpapi` กุญแจลับเข้ารหัสด้วย DPAPI (CurrentUser) **ห้ามคัดลอกออกไปที่อื่น** (คัดลอกไปก็ถอดไม่ได้)
-   - `master-public.pem` กุญแจสาธารณะ ใช้คัดลอกไปที่เครื่องลูก
-   - ถ้าพบ `master-private.pem` แบบไม่เข้ารหัสจากรุ่นเก่า โปรแกรมจะอ่านครั้งเดียว เข้ารหัสเป็น `.dpapi` แล้วลบไฟล์ plaintext ทิ้ง
-2. **ติดตั้ง Agent บนเครื่องลูก**: คัดลอกโฟลเดอร์ `publish` และ `master-public.pem` ไปที่เครื่องลูก
-   แล้วเปิด PowerShell แบบ Administrator:
+1. **เปิด Master ครั้งแรก** แล้วส่งออก enrollment bundle ของเครื่องลูกจากเมนู **เพิ่มเติม**
+2. **ติดตั้ง Agent บนเครื่องลูก**: คัดลอกโฟลเดอร์ `publish` และไฟล์ `.rdrop` ไปที่เครื่องลูก แล้วเปิด PowerShell แบบ Administrator:
    ```powershell
    Set-ExecutionPolicy -Scope Process Bypass
-   .\install-agent.ps1 -PublicKey .\master-public.pem -Password MyStrongPass123
+   .\install-agent.ps1 -Bundle .\PC-01.rdrop -BundlePassword MyBundlePass12 -Password MyStrongPass123
    ```
-   สคริปต์จะติดตั้งไว้ที่ `C:\Program Files\RainDrop\Agent`, เปิดไฟร์วอลล์พอร์ต 11400 และตั้งให้ทำงานอัตโนมัติเมื่อล็อกอิน
-   (ถ้าจะทดสอบเร็ว ๆ ก็วาง `agent-public.pem` ข้าง `RainDrop.Agent.exe` แล้วดับเบิลคลิกรันได้เลย)
+   สคริปต์ติดตั้งที่ `C:\Program Files\RainDrop\Agent`, เปิดไฟร์วอลล์พอร์ต 11400 และตั้งให้ทำงานอัตโนมัติ
+   identity ของ Agent ถูกเก็บใน `%ProgramData%\RainDrop\private` ซึ่งผู้ใช้ทั่วไปอ่าน/เขียนไม่ได้
 3. ที่ Master กด **เพิ่มเครื่อง** แล้วใส่ IP ของเครื่องลูก ภาพหน้าจอจะขึ้นภายในไม่กี่วินาที
 4. วิธีใช้งาน:
    - **คลิก** ที่ภาพเพื่อเลือกเครื่อง (กรอบเป็นสีฟ้า) ถ้าไม่เลือกเลย คำสั่งจะส่งไป **ทุกเครื่อง**
@@ -191,7 +188,8 @@ CI (`.github/workflows/ci.yml`) รันสองคำสั่งนี้บ
 |---|---|
 | หมดเวลา: IP ผิด, เครื่องปิดอยู่ หรือไฟร์วอลล์... | ตรวจ IP / ไฟร์วอลล์เครื่องลูก (ดูข้อ 2) |
 | เครื่องลูกปฏิเสธการเชื่อมต่อ: Agent ไม่ได้ทำงาน | ที่เครื่องลูกไม่มีไอคอนโล่ ให้เปิดโปรแกรม หรือตรวจว่าแอนตี้ไวรัสบล็อกหรือไม่ |
-| กุญแจไม่ตรงกัน | Master กับ Agent มาจากการ build คนละชุด ให้เทียบลายนิ้วมือ (ข้อ 3) |
+| TLS ปฏิเสธการเชื่อมต่อ | ใบรับรองหมดอายุ/ถูกเพิกถอน/ไม่ใช่ CA เดียวกัน หรือชื่อเครื่องไม่ตรงกับที่ enroll ไว้ ให้ enroll ใหม่ |
+| กุญแจไม่ตรงกัน | กุญแจ challenge ชั้นที่สองไม่ตรง ให้ใช้ bundle จาก Master นี้ |
 | ติดต่อเครื่องนี้ไม่ได้: อยู่คนละวงเครือข่าย | สองเครื่องต้องอยู่ในวงเครือข่ายที่ติดต่อกันได้ |
 
 **2. รันสคริปต์ตรวจสอบบนเครื่องลูก** (ติดตั้งมาพร้อม Agent แล้ว) ใน PowerShell แบบ Administrator:
@@ -284,9 +282,9 @@ Set-ExecutionPolicy -Scope Process Bypass
   คำสั่งตั้ง/อ่าน blocklist รับเฉพาะจากโปรเซส Agent ที่ Service เปิดเอง (ตรวจ PID ของปลายท่อ)
 
 **ตั้งรหัสผ่านตอนติดตั้ง:** ตัวติดตั้งบังคับกรอกรหัสอย่างน้อย 8 ตัวอักษร (ห้ามว่าง ไม่มีค่าเริ่มต้น `raindrop` อีกต่อไป)
-โหมดเงียบต้องส่ง `/PASSWORD=` และ `/PUBLICKEY=` มิฉะนั้นล้มเหลวทันที:
+โหมดเงียบต้องส่ง `/PASSWORD=`, `/BUNDLE=` และ `/BUNDLEPASSWORD=` มิฉะนั้นล้มเหลวทันที:
 ```
-RainDrop-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PASSWORD=MyStrongPass123 /PUBLICKEY=C:\deploy\master-public.pem
+RainDrop-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PASSWORD=MyStrongPass123 /BUNDLE=C:\deploy\PC-01.rdrop /BUNDLEPASSWORD=MyBundlePass12
 ```
 รหัสถูกเก็บเป็น PBKDF2 (ไม่เก็บรหัสจริง) ใน `%ProgramData%\RainDrop\private\credentials.json`
 ซึ่งตั้ง ACL ให้เฉพาะ SYSTEM/Administrators อ่านได้ ผู้ใช้ทั่วไปไม่มีสิทธิ์แม้แต่เปิดอ่าน
@@ -294,11 +292,37 @@ RainDrop-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PASSWORD=MySt
 
 > **ขอบเขตการป้องกัน:** กันผู้ใช้ทั่วไป (นักเรียน/พนักงาน) ได้ แต่ **ไม่ได้กันผู้ที่เป็น Administrator ของเครื่อง** ซึ่งหยุด Service เองได้เสมอ — เป็นไปตามหลักของ Windows ที่เจ้าของเครื่องต้องควบคุมเครื่องตัวเองได้
 
+## ความปลอดภัยช่องควบคุม (C2a)
+
+- TCP 11400 ห่อด้วย `SslStream` แบบ mutual TLS ทั้งสองฝั่ง บังคับใบรับรอง client และปฏิเสธ TLS ต่ำกว่า 1.2
+- เชื่อใจเฉพาะ CA ขององค์กรที่ pin ไว้ (`X509ChainPolicy.CustomRootTrust`) ไม่ใช้ Windows root store
+- ใบรับรอง Master มี EKU ClientAuth, ใบรับรอง Agent มี EKU ServerAuth อายุ 1 ปี; สลับบทบาทไม่ได้
+- หลัง TLS ยังมีการยืนยันตัวตนแบบ challenge/response ECDSA เดิม (C1) เป็นชั้นที่สอง แล้วส่งรายการเพิกถอนแบบมีเวอร์ชัน
+- Master เก็บรายการเพิกถอนเข้ารหัส DPAPI; Agent เก็บใน `private\revocation.json` ที่ Users แก้ไม่ได้ และปฏิเสธ snapshot ย้อน version
+- Audit แบบ hash chain ทั้ง Master (`%AppData%\RainDrop\audit`) และ Agent (`private\audit`) หมุนไฟล์ ~10 MiB × 5
+  ตรวจด้วย `RainDrop.Master.exe --verify-audit`, `RainDrop.Agent.exe --verify-audit` หรือเมนูที่ถาดไอคอน
+  audit บันทึกเฉพาะ metadata (เวลา/event/IP/ผล) ไม่บันทึกแชท คีย์ที่พิมพ์ รหัสผ่าน หรือภาพ
+- `RunCommand` ที่ Agent: ค่าเริ่มต้นอนุญาตเฉพาะ URL `http/https` ที่ไม่มีอาร์กิวเมนต์; โปรแกรมต้องอยู่ใน
+  `private\run-allowlist.json` (พาธเต็ม) ซึ่ง Users แก้ไม่ได้ การเปิดโปรแกรมไม่ผ่าน shell
+- Agent จำกัดการเชื่อมต่อใหม่ 30 ครั้ง/IP/นาที และ handshake ล้มเหลว 8 ครั้ง/IP/นาที
+
+### ความลับบนเครื่องลูกหลัง C2a
+
+| ที่เก็บ | เนื้อหา | สิทธิ์ |
+|---|---|---|
+| `%ProgramData%\RainDrop\private\agent-cert.der` + `agent-key.pkcs8` | ใบรับรองและกุญแจลับของ Agent เครื่องนี้เท่านั้น | SYSTEM/Administrators; Users เข้าไม่ได้ |
+| `%ProgramData%\RainDrop\private\ca-cert.der` | กุญแจสาธารณะของ CA (ไม่ใช่ความลับ) | SYSTEM/Administrators |
+| `%ProgramData%\RainDrop\private\revocation.json`, `run-allowlist.json`, `audit\` | นโยบาย/บันทึกที่ผู้ใช้แก้ไม่ได้ | SYSTEM/Administrators |
+| `%ProgramData%\RainDrop\challenge-public.pem` | กุญแจสาธารณะ challenge ของ Master | Users อ่านได้อย่างเดียว |
+
+กุญแจลับ CA ไม่อยู่บนเครื่องลูก กุญแจ Agent ใช้เป็น client certificate ไม่ได้ (ผิด EKU) และถ้าหลุดจะปลอมได้เฉพาะเครื่องนั้น
+ผู้ใช้ที่เป็น Administrator ของเครื่องยังสามารถหยุด Service/อ่านหน่วยความจำได้ เป็นขอบเขตเดิมของ Windows
+
 ## ข้อจำกัดของ Prototype และสิ่งที่ควรทำต่อ
 
 | ข้อจำกัด | แนวทางแก้ในเวอร์ชันถัดไป |
 |---|---|
-| ข้อมูลไม่ได้เข้ารหัส (มีการยืนยันตัวตนแต่ภาพหน้าจอวิ่งเป็น plaintext บน LAN) | ห่อ stream ด้วย `SslStream` (TLS) |
+| ช่องควบคุม Agent↔Master เข้ารหัส mutual TLS แล้ว (C2a) แต่ห้องชุมชน Hub ยังไม่เข้ารหัส | TLS ของ Hub ในเฟสถัดไป |
 | Agent รันในเซสชันผู้ใช้ (มี Service คอยปลุกกลับ) จึงจับภาพหน้า UAC/Lock screen ไม่ได้ | การจับ secure desktop ต้องรันส่วนจับภาพใน session 0 ซึ่งซับซ้อนและอยู่นอกขอบเขตปัจจุบัน |
 | ส่งภาพเต็มเฟรม JPEG ทุกครั้ง (ใช้แบนด์วิดท์มาก) | ส่งเฉพาะส่วนที่เปลี่ยน (dirty rectangles) หรือใช้ Desktop Duplication API + H.264 |
 | ล็อกจอบล็อก Ctrl+Alt+Del ไม่ได้ | เป็นข้อจำกัดของ Windows |
@@ -308,7 +332,7 @@ RainDrop-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PASSWORD=MySt
 | ห้องชุมชน: ยังไม่เข้ารหัสการรับส่ง | หุ้มด้วย TLS |
 | ข้อความเสียงเป็น WAV ที่ไม่บีบอัด | บีบอัดเป็น Opus/MP3 (ไฟล์เล็กลงราว 10 เท่า) แต่ต้องใช้ไลบรารีเพิ่ม เช่น NAudio + Concentus |
 | ฟังข้อความเสียงได้ทีละข้อความ และไม่มีแถบเลื่อนตำแหน่ง | เปลี่ยนไปใช้ NAudio เพื่อให้มีแถบความคืบหน้า |
-| ยังไม่มี | Wake-on-LAN, ส่งไฟล์, แสดงหน้าจอผู้สอนไปทุกเครื่อง (demo mode), log การใช้งาน |
+| ยังไม่มี | Wake-on-LAN, ส่งไฟล์, แสดงหน้าจอผู้สอนไปทุกเครื่อง (demo mode), pairing code (C2b) |
 
 ## ข้อควรระวังด้านกฎหมาย
 
