@@ -18,7 +18,8 @@ public static class ControlMessages
 public sealed class ControlTlsException : AuthenticationException
 {
     public string Reason { get; }
-    public ControlTlsException(string reason) : base("Control-channel TLS rejected: " + reason) => Reason = reason;
+    public ControlTlsException(string reason, Exception? inner = null)
+        : base("Control-channel TLS rejected: " + reason + (inner is null ? "" : " (" + inner.GetType().Name + ": " + inner.Message + ")"), inner) => Reason = reason;
 }
 
 public static class ControlTls
@@ -56,7 +57,7 @@ public static class ControlTls
         catch (Exception ex) when (ex is AuthenticationException or IOException or OperationCanceledException)
         {
             await ssl.DisposeAsync().ConfigureAwait(false);
-            throw new ControlTlsException(ex is ControlTlsException tex ? tex.Reason : reason);
+            throw new ControlTlsException(ex is ControlTlsException tex ? tex.Reason : reason, ex);
         }
     }
 
@@ -93,7 +94,7 @@ public static class ControlTls
         catch (Exception ex) when (ex is AuthenticationException or IOException or OperationCanceledException)
         {
             await ssl.DisposeAsync().ConfigureAwait(false);
-            throw new ControlTlsException(ex is ControlTlsException tex ? tex.Reason : reason);
+            throw new ControlTlsException(ex is ControlTlsException tex ? tex.Reason : reason, ex);
         }
     }
 }
