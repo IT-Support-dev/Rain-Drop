@@ -122,12 +122,21 @@ internal sealed class AgentClient : IDisposable
 
                     case MsgType.ChatMessage:
                         try { ChatReceived?.Invoke(Protocol.FromJson<ChatMsg>(payload)); }
-                        catch { /* ข้อความผิดรูปแบบ หรือผู้รับ event มีปัญหา: ข้ามไป */ }
+                        catch (Exception ex)
+                        {
+                            // ข้อความผิดรูปแบบจากเครือข่าย หรือ handler ฝั่ง UI โยน: ข้ามข้อความนี้
+                            // เพื่อให้ลูปอ่านยังรับภาพหน้าจอ/คำสั่งอื่นต่อได้ แต่ต้องไม่เห็นเงียบ ๆ
+                            Diag.Warn("AgentClient.ReaderLoop", "จัดการข้อความแชทไม่สำเร็จ ข้ามข้อความนี้", ex);
+                        }
                         break;
 
                     case MsgType.VoiceMessage:
                         try { VoiceReceived?.Invoke(Protocol.FromJson<VoiceMsg>(payload)); }
-                        catch { /* ข้ามไป */ }
+                        catch (Exception ex)
+                        {
+                            // เหตุผลเดียวกับแชท: ข้ามเฉพาะข้อความเสียงที่เสีย ลูปอ่านต้องทำงานต่อ
+                            Diag.Warn("AgentClient.ReaderLoop", "จัดการข้อความเสียงไม่สำเร็จ ข้ามข้อความนี้", ex);
+                        }
                         break;
 
                     case MsgType.ActivitySnapshot:
@@ -136,7 +145,11 @@ internal sealed class AgentClient : IDisposable
 
                     case MsgType.Alert:
                         try { AlertReceived?.Invoke(Protocol.FromJson<AlertMsg>(payload)); }
-                        catch { /* ข้ามไป */ }
+                        catch (Exception ex)
+                        {
+                            // เหตุผลเดียวกับแชท: การแจ้งเตือนที่เสียต้องไม่ตัดการเชื่อมต่อทั้งหมด
+                            Diag.Warn("AgentClient.ReaderLoop", "จัดการการแจ้งเตือนไม่สำเร็จ ข้ามข้อความนี้", ex);
+                        }
                         break;
                 }
             }

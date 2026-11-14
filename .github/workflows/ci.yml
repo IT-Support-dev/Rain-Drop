@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-test:
-    # โปรเจกต์ WinForms (Shared/Agent/Master/Hub) เป็น net8.0-windows จึงต้อง build บน Windows
+    # ทุกโปรเจกต์เป็น net8.0-windows (WinForms) และ Tests อ้างอิง Agent/AgentService จึงต้องรันบน Windows
     runs-on: windows-latest
 
     steps:
@@ -21,15 +21,52 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Build (Release)
-        run: dotnet build -c Release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          dotnet build -c Release > build.log 2>&1
+          $code = $LASTEXITCODE
+          Get-Content build.log | ForEach-Object { Write-Host $_ }
+
+          # แสดงทุก warning/error เป็น annotation เพื่ออ่านย้อนหลังได้ผ่าน API
+          $diags = Select-String -Path build.log -Pattern '\b(warning|error)\s+[A-Z]+[0-9]+' |
+                   ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique
+          foreach ($d in $diags) {
+            $safe = $d.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            if ($d -match '\berror\s+[A-Z]+[0-9]+') { Write-Host "::error::$safe" }
+            else { Write-Host "::warning::$safe" }
+          }
+          exit $code
 
       - name: Test
-        run: dotnet test Tests/Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test Tests/Tests.csproj -c Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+
+      - name: Test summary
+        if: always()
+        shell: pwsh
+        run: |
+          $trx = Get-ChildItem -Path TestResults -Recurse -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $trx) { Write-Host "::warning::no trx produced (build may have failed)"; exit 0 }
+          [xml]$x = Get-Content -Raw $trx.FullName
+          $c = $x.TestRun.ResultSummary.Counters
+          $summary = "passed=$($c.passed) failed=$($c.failed) notExecuted=$($c.notExecuted) total=$($c.total)"
+          Write-Host "TEST SUMMARY: $summary"
+          Write-Host "::notice title=Test results::$summary"
+          "## Test results`n`n$summary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          # ถ้ามีเทสต์ล้ม ให้รายงานชื่อเทสต์ + ข้อความ error เป็น annotation (เฟส B ข้อ 12)
+          foreach ($r in $x.TestRun.Results.UnitTestResult) {
+            if ($r.outcome -ne 'Passed') {
+              $msg = [string]$r.Output.ErrorInfo.Message
+              $safe = ($r.testName + ' :: ' + $msg).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+              Write-Host "::error title=Test $($r.outcome)::$safe"
+            }
+          }
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-results
-          path: "**/test-results.trx"
+          path: TestResults/**/*.trx
           if-no-files-found: ignore

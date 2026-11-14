@@ -19,7 +19,7 @@ public sealed class CommunityForm : Form
     private readonly ListBox _voiceList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
     private readonly ListBox _memberList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
     private readonly FlowLayoutPanel _messages = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Color.White, Padding = new Padding(6) };
-    private readonly Label _channelTitle = new() { Dock = DockStyle.Top, Height = 32, Font = new Font("Tahoma", 11, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0), BackColor = Color.FromArgb(240, 242, 245) };
+    private readonly Label _channelTitle = new() { Dock = DockStyle.Top, Height = 32, Font = DiscordTheme.FontHeaderBold, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0), BackColor = Color.FromArgb(240, 242, 245) };
     private readonly TextBox _input = new() { Dock = DockStyle.Fill, Multiline = true };
     private readonly Button _voiceButton = new() { Dock = DockStyle.Top, Height = 34, Text = "เข้าร่วมห้องเสียงที่เลือก", Enabled = false };
     private readonly Button _muteButton = new() { Dock = DockStyle.Top, Height = 28, Text = "ปิดไมค์", Visible = false };
@@ -46,7 +46,7 @@ public sealed class CommunityForm : Form
         Text = "Rain Drop - ชุมชน";
         Size = new Size(1040, 680);
         StartPosition = FormStartPosition.CenterScreen;
-        Font = new Font("Tahoma", 9.5f);
+        Font = DiscordTheme.FontMedium;
         Icon = AppIcon.Load();
 
         BuildLayout();
@@ -116,7 +116,7 @@ public sealed class CommunityForm : Form
     {
         Text = text,
         Dock = DockStyle.Fill,
-        Font = new Font("Tahoma", 8.5f, FontStyle.Bold),
+        Font = DiscordTheme.FontSmallBold,
         ForeColor = Color.DimGray,
         TextAlign = ContentAlignment.MiddleLeft,
         Padding = new Padding(8, 0, 0, 0),
@@ -260,7 +260,7 @@ public sealed class CommunityForm : Form
         {
             AutoSize = true,
             Text = $"{post.SenderName}   {post.Time:HH:mm}",
-            Font = new Font("Tahoma", 8, FontStyle.Bold),
+            Font = DiscordTheme.FontTinyBold,
             ForeColor = mine ? Color.SteelBlue : Color.SeaGreen,
             Margin = new Padding(0, 0, 0, 3),
         });
@@ -293,7 +293,11 @@ public sealed class CommunityForm : Form
                 pic.Click += (_, _) => OpenFile(path);
                 return pic;
             }
-            catch { /* ตกไปแสดงเป็นลิงก์ */ }
+            catch
+            {
+                // จงใจเพิกเฉย: ไฟล์ที่นามสกุลเป็นรูปแต่เนื้อหาไม่ใช่รูป (หรือเสียหาย) ถอดรหัสไม่ได้
+                // โค้ดด้านล่างจะแสดงเป็นลิงก์ให้เปิดเองแทน ซึ่งเป็นทางเลือกที่ถูกต้องอยู่แล้ว
+            }
         }
 
         var link = new LinkLabel { AutoSize = true, Text = $"📎 {att.FileName} ({Human(att.Size)})" };
@@ -372,7 +376,11 @@ public sealed class CommunityForm : Form
             Directory.CreateDirectory(DownloadDir);
             File.WriteAllBytes(path, ms.ToArray());
         }
-        catch { /* เขียนไม่ได้ */ }
+        catch (Exception ex)
+        {
+            // เขียนไฟล์ที่รับมาไม่ได้ = ผู้ใช้เสียไฟล์นั้นไปเงียบ ๆ ต้องมีร่องรอย
+            Diag.Error("CommunityForm", $"บันทึกไฟล์ที่รับมาลง '{path}' ไม่สำเร็จ", ex);
+        }
         finally
         {
             ms.Dispose();
@@ -490,7 +498,12 @@ public sealed class CommunityForm : Form
 
     private static void OpenFile(string path)
     {
-        try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch { }
+        try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+        catch (Exception ex)
+        {
+            // เปิดไม่ได้ (ไม่มีโปรแกรมผูกชนิดไฟล์ / ไฟล์ถูกลบไปแล้ว) ไม่ควรทำให้หน้าต่างชุมชนล้ม
+            Diag.Warn("CommunityForm.OpenFile", $"เปิดไฟล์ '{path}' ไม่สำเร็จ", ex);
+        }
     }
 
     protected override void OnShown(EventArgs e)

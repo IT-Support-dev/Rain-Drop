@@ -126,7 +126,11 @@ public sealed class HubClient : IDisposable
                 Send(HubMsg.Ping, Array.Empty<byte>());
             }
         }
-        catch { /* ปิดแล้ว */ }
+        catch
+        {
+            // จงใจเพิกเฉย: ลูป ping สิ้นสุดเมื่อถูกยกเลิก (ปิดการเชื่อมต่อ) หรือส่งไม่ออกเพราะสายหลุด
+            // ทั้งสองกรณีเป็นทางออกปกติของลูป สถานะการเชื่อมต่อถูกจัดการโดย Fail/reader loop แล้ว
+        }
     }
 
     private void Fail(string reason)

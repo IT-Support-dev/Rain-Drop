@@ -83,7 +83,11 @@ internal sealed class MasterSettings
             if (File.Exists(PathOnDisk))
                 return JsonSerializer.Deserialize<MasterSettings>(File.ReadAllText(PathOnDisk)) ?? new MasterSettings();
         }
-        catch { /* ใช้ค่าเริ่มต้น */ }
+        catch (Exception ex)
+        {
+            // ตั้งค่าหาย = รายชื่อเครื่อง/รายการบล็อกที่ผู้ดูแลเคยตั้งไว้จะไม่ถูกโหลด ต้องตรวจสอบได้
+            Diag.Warn("MasterSettings.Load", "อ่านค่าตั้งของ Master ไม่สำเร็จ จึงใช้ค่าเริ่มต้น", ex);
+        }
         return new MasterSettings();
     }
 

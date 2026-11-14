@@ -21,6 +21,20 @@ internal sealed class ActivityForm : Form
     private readonly ListBox _running = new();
     private readonly ListView _files = new();
 
+    // แคชฟอนต์ตัวหนาของแถวที่แอคทีฟ: เดิม Render สร้าง new Font ทุกแถวทุก 2 วินาที แล้วไม่ Dispose
+    // เก็บตามฟอนต์ฐาน (รองรับ DPI ที่เปลี่ยน) แล้ว Dispose ทั้งหมดตอนปิดฟอร์ม
+    private readonly Dictionary<Font, Font> _boldFonts = new();
+
+    private Font BoldFor(Font baseFont)
+    {
+        if (!_boldFonts.TryGetValue(baseFont, out var bold))
+        {
+            bold = new Font(baseFont, FontStyle.Bold);
+            _boldFonts[baseFont] = bold;
+        }
+        return bold;
+    }
+
     public ActivityForm(HostEntry host, MasterSettings settings, MasterKey key)
     {
         _host = host;
@@ -31,7 +45,7 @@ internal sealed class ActivityForm : Form
         Icon = AppIcon.Load();
         Size = new Size(960, 680);
         StartPosition = FormStartPosition.CenterScreen;
-        Font = new Font("Tahoma", 9);
+        Font = DiscordTheme.FontUi;
         BackColor = DiscordTheme.Content;
         ForeColor = DiscordTheme.TextNormal;
 
@@ -46,7 +60,7 @@ internal sealed class ActivityForm : Form
         _active.Height = 28;
         _active.Text = "กำลังเชื่อมต่อ...";
         _active.ForeColor = DiscordTheme.TextBright;
-        _active.Font = new Font("Tahoma", 13, FontStyle.Bold);
+        _active.Font = DiscordTheme.FontTitleBold;
         _sub.Dock = DockStyle.Top;
         _sub.Height = 20;
         _sub.ForeColor = DiscordTheme.TextMuted;
@@ -98,7 +112,7 @@ internal sealed class ActivityForm : Form
         Height = 24,
         Text = text,
         ForeColor = DiscordTheme.TextMuted,
-        Font = new Font("Tahoma", 8.5f, FontStyle.Bold),
+        Font = DiscordTheme.FontSmallBold,
         TextAlign = ContentAlignment.MiddleLeft,
     };
 
@@ -176,7 +190,7 @@ internal sealed class ActivityForm : Form
             if (u.Process.Equals(s.ForegroundProcess, StringComparison.OrdinalIgnoreCase))
             {
                 item.ForeColor = DiscordTheme.Online;           // โปรแกรมที่แอคทีฟอยู่ตอนนี้
-                item.Font = new Font(_usage.Font, FontStyle.Bold);
+                item.Font = BoldFor(_usage.Font);
             }
             _usage.Items.Add(item);
         }
@@ -217,6 +231,8 @@ internal sealed class ActivityForm : Form
     {
         _cts.Cancel();
         _client?.Dispose();
+        foreach (var font in _boldFonts.Values) font.Dispose();
+        _boldFonts.Clear();
         base.OnFormClosed(e);
     }
 }

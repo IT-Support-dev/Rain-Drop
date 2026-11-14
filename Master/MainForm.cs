@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using RainDrop.Shared;
 
 namespace RainDrop.Master;
@@ -30,7 +31,7 @@ internal sealed class MainForm : Form
         Icon = AppIcon.Load();
         Size = new Size(1400, 860);
         StartPosition = FormStartPosition.CenterScreen;
-        Font = new Font("Tahoma", 9);
+        Font = DiscordTheme.FontUi;
 
         _settings = MasterSettings.Load();
         _key = MasterKey.LoadOrCreate();
@@ -77,8 +78,8 @@ internal sealed class MainForm : Form
     {
         var sidebar = new Panel { Dock = DockStyle.Left, Width = 240, BackColor = DiscordTheme.Sidebar };
 
-        var header = new Label { Dock = DockStyle.Top, Height = 48, Text = "  Rain Drop", ForeColor = DiscordTheme.TextBright, Font = new Font("Tahoma", 11, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft, BackColor = DiscordTheme.Sidebar };
-        var cat = new Label { Dock = DockStyle.Top, Height = 26, Text = "▾  เครื่องในเครือข่าย", ForeColor = DiscordTheme.TextMuted, Font = new Font("Tahoma", 8, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 6, 0, 0) };
+        var header = new Label { Dock = DockStyle.Top, Height = 48, Text = "  Rain Drop", ForeColor = DiscordTheme.TextBright, Font = DiscordTheme.FontHeaderBold, TextAlign = ContentAlignment.MiddleLeft, BackColor = DiscordTheme.Sidebar };
+        var cat = new Label { Dock = DockStyle.Top, Height = 26, Text = "▾  เครื่องในเครือข่าย", ForeColor = DiscordTheme.TextMuted, Font = DiscordTheme.FontTinyBold, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 6, 0, 0) };
 
         _channelList.Dock = DockStyle.Fill;
         _channelList.FlowDirection = FlowDirection.TopDown;
@@ -92,7 +93,7 @@ internal sealed class MainForm : Form
         var avatar = DiscordTheme.ServerIcon("A", DiscordTheme.Blurple);
         avatar.Size = new Size(34, 34);
         avatar.Margin = new Padding(8, 9, 6, 9);
-        var uname = new Label { Dock = DockStyle.Fill, Text = "ผู้ดูแลระบบ\n● ออนไลน์", ForeColor = DiscordTheme.TextNormal, Font = new Font("Tahoma", 8), TextAlign = ContentAlignment.MiddleLeft };
+        var uname = new Label { Dock = DockStyle.Fill, Text = "ผู้ดูแลระบบ\n● ออนไลน์", ForeColor = DiscordTheme.TextNormal, Font = DiscordTheme.FontTiny, TextAlign = ContentAlignment.MiddleLeft };
         var gear = DiscordTheme.HeaderButton("⚙");
         gear.Dock = DockStyle.Right;
         gear.Click += (_, _) => ShowSettings();
@@ -115,7 +116,7 @@ internal sealed class MainForm : Form
         var center = new Panel { Dock = DockStyle.Fill, BackColor = DiscordTheme.Content };
 
         var header = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = DiscordTheme.Content };
-        var title = new Label { Dock = DockStyle.Left, Width = 230, Text = "#  จอภาพเครื่องลูก", ForeColor = DiscordTheme.TextBright, Font = new Font("Tahoma", 10.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(14, 0, 0, 0) };
+        var title = new Label { Dock = DockStyle.Left, Width = 230, Text = "#  จอภาพเครื่องลูก", ForeColor = DiscordTheme.TextBright, Font = DiscordTheme.FontSubTitleBold, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(14, 0, 0, 0) };
 
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true, BackColor = DiscordTheme.Content, Padding = new Padding(2, 7, 2, 7) };
         void HB(string text, Action act) { var b = DiscordTheme.HeaderButton(text); b.Click += (_, _) => act(); actions.Controls.Add(b); }
@@ -177,7 +178,7 @@ internal sealed class MainForm : Form
         _memberHeader.Height = 32;
         _memberHeader.Text = "ออนไลน์";
         _memberHeader.ForeColor = DiscordTheme.TextMuted;
-        _memberHeader.Font = new Font("Tahoma", 8, FontStyle.Bold);
+        _memberHeader.Font = DiscordTheme.FontTinyBold;
         _memberHeader.TextAlign = ContentAlignment.MiddleLeft;
         _memberHeader.Padding = new Padding(14, 8, 0, 0);
 
@@ -195,26 +196,102 @@ internal sealed class MainForm : Form
 
     // ===================== อัปเดตแถบช่อง/รายชื่อจากสถานะเครื่องจริง =====================
 
+    // แคชแถวของแถบข้าง: เดิมสร้างคอนโทรลใหม่ทั้งหมดทุก 1.5 วินาที และ Controls.Clear() ไม่ได้ Dispose ให้
+    // จึงรั่วทั้ง GDI handle และ window handle สะสมเรื่อย ๆ ตอนนี้สร้างครั้งเดียวแล้วอัปเดตเฉพาะค่าที่เปลี่ยน
+    private readonly Dictionary<HostTile, Label> _channelRows = new();
+    private readonly List<Label> _memberRows = new();
+    private string _sidebarSignature = "";
+
     private void RefreshSidebars()
     {
         int online = _tiles.Count(t => t.IsOnline);
+        var ordered = _tiles.OrderByDescending(t => t.IsOnline).ThenBy(t => t.Host.Name).ToList();
 
-        _channelList.SuspendLayout();
-        _channelList.Controls.Clear();
-        foreach (var tile in _tiles)
-            _channelList.Controls.Add(ChannelRow(tile));
-        _channelList.ResumeLayout();
+        // ลายเซ็นของข้อมูลที่ใช้วาด ถ้าเหมือนรอบก่อนแปลว่าไม่มีอะไรเปลี่ยน จึงไม่แตะ UI เลย
+        var sig = new StringBuilder();
+        foreach (var t in _tiles)
+            sig.Append(t.Host.Name).Append(':').Append(t.IsOnline).Append(':').Append(t.Selected).Append('|');
+        sig.Append("||");
+        foreach (var t in ordered)
+            sig.Append(t.Host.Name).Append(':').Append(t.IsOnline).Append('|');
+        string signature = sig.ToString();
+        if (signature == _sidebarSignature) return;
+        _sidebarSignature = signature;
 
+        RefreshChannelRows();
         _memberHeader.Text = $"ออนไลน์ — {online}";
-        _memberList.SuspendLayout();
-        _memberList.Controls.Clear();
-        _memberList.Controls.Add(MemberLabel("ผู้ดูแลระบบ", true, admin: true));
-        foreach (var tile in _tiles.OrderByDescending(t => t.IsOnline).ThenBy(t => t.Host.Name))
-            _memberList.Controls.Add(MemberLabel(tile.Host.Name, tile.IsOnline, admin: false));
-        _memberList.ResumeLayout();
+        RefreshMemberRows(ordered);
     }
 
-    private Control ChannelRow(HostTile tile)
+    private void RefreshChannelRows()
+    {
+        _channelList.SuspendLayout();
+        try
+        {
+            // สร้าง/ทิ้งแถวเฉพาะเมื่อรายชื่อเครื่องเปลี่ยน (เพิ่ม/ลบ) ซึ่งเกิดไม่บ่อย
+            bool membershipChanged = _channelRows.Count != _tiles.Count || _tiles.Any(t => !_channelRows.ContainsKey(t));
+            if (membershipChanged)
+            {
+                foreach (var old in _channelRows.Values)
+                {
+                    _channelList.Controls.Remove(old);
+                    old.ContextMenuStrip?.Dispose();
+                    old.Dispose();
+                }
+                _channelRows.Clear();
+                foreach (var tile in _tiles)
+                {
+                    var row = CreateChannelRow(tile);
+                    _channelRows[tile] = row;
+                    _channelList.Controls.Add(row);
+                }
+            }
+
+            // นอกนั้นอัปเดตแค่ข้อความ/สีบนแถวเดิม ไม่สร้างคอนโทรลใหม่
+            foreach (var tile in _tiles)
+            {
+                var row = _channelRows[tile];
+                string text = $"#  {tile.Host.Name}";
+                if (row.Text != text) row.Text = text;
+                var fore = tile.Selected ? DiscordTheme.TextBright
+                         : tile.IsOnline ? DiscordTheme.TextNormal : DiscordTheme.TextMuted;
+                var back = tile.Selected ? DiscordTheme.Selected : DiscordTheme.Sidebar;
+                if (row.ForeColor != fore) row.ForeColor = fore;
+                if (row.BackColor != back) row.BackColor = back;
+            }
+        }
+        finally { _channelList.ResumeLayout(); }
+    }
+
+    private void RefreshMemberRows(List<HostTile> ordered)
+    {
+        _memberList.SuspendLayout();
+        try
+        {
+            int needed = ordered.Count + 1; // +1 = ตัวผู้ดูแลระบบเอง
+            while (_memberRows.Count > needed)
+            {
+                var last = _memberRows[^1];
+                _memberRows.RemoveAt(_memberRows.Count - 1);
+                _memberList.Controls.Remove(last);
+                last.Dispose();
+            }
+            while (_memberRows.Count < needed)
+            {
+                var row = CreateMemberLabel();
+                _memberRows.Add(row);
+                _memberList.Controls.Add(row);
+            }
+
+            // เปลี่ยนสถานะออนไลน์ = สลับข้อความ/สีในแถวเดิม จึงไม่ต้องสร้างคอนโทรลใหม่ทุกรอบ
+            SetMemberLabel(_memberRows[0], "ผู้ดูแลระบบ", true);
+            for (int i = 0; i < ordered.Count; i++)
+                SetMemberLabel(_memberRows[i + 1], ordered[i].Host.Name, ordered[i].IsOnline);
+        }
+        finally { _memberList.ResumeLayout(); }
+    }
+
+    private Label CreateChannelRow(HostTile tile)
     {
         var row = new Label
         {
@@ -223,7 +300,7 @@ internal sealed class MainForm : Form
             Text = $"#  {tile.Host.Name}",
             ForeColor = tile.Selected ? DiscordTheme.TextBright : (tile.IsOnline ? DiscordTheme.TextNormal : DiscordTheme.TextMuted),
             BackColor = tile.Selected ? DiscordTheme.Selected : DiscordTheme.Sidebar,
-            Font = new Font("Tahoma", 9.5f),
+            Font = DiscordTheme.FontMedium,
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(8, 0, 0, 0),
             Margin = new Padding(0, 1, 0, 1),
@@ -250,20 +327,23 @@ internal sealed class MainForm : Form
         return row;
     }
 
-    private static Control MemberLabel(string name, bool online, bool admin)
+    private static Label CreateMemberLabel() => new()
     {
-        return new Label
-        {
-            Width = 196,
-            Height = 28,
-            Text = "●  " + name,
-            ForeColor = online ? DiscordTheme.TextNormal : DiscordTheme.TextMuted,
-            BackColor = DiscordTheme.Sidebar,
-            Font = new Font("Tahoma", 9),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Padding = new Padding(6, 0, 0, 0),
-            Margin = new Padding(0, 1, 0, 1),
-        };
+        Width = 196,
+        Height = 28,
+        BackColor = DiscordTheme.Sidebar,
+        Font = DiscordTheme.FontUi,
+        TextAlign = ContentAlignment.MiddleLeft,
+        Padding = new Padding(6, 0, 0, 0),
+        Margin = new Padding(0, 1, 0, 1),
+    };
+
+    private static void SetMemberLabel(Label row, string name, bool online)
+    {
+        string text = "●  " + name;
+        if (row.Text != text) row.Text = text;
+        var fore = online ? DiscordTheme.TextNormal : DiscordTheme.TextMuted;
+        if (row.ForeColor != fore) row.ForeColor = fore;
     }
 
     private void AddTile(HostEntry host)
@@ -567,7 +647,12 @@ internal sealed class MainForm : Form
         string title = $"{tile.Host.Name} — {msg.Kind}";
         _status.Text = $"🔔 {title}: {msg.Text}  ({msg.Time:HH:mm:ss})";
         ShowToast(title, msg.Text, msg.Kind);
-        try { _tray.ShowBalloonTip(5000, title, msg.Text, ToolTipIcon.Warning); } catch { }
+        try { _tray.ShowBalloonTip(5000, title, msg.Text, ToolTipIcon.Warning); }
+        catch (Exception ex)
+        {
+            // บอลลูนเป็นช่องทางเสริม การ์ด toast และแถบสถานะยังแจ้งผู้ใช้อยู่ จึงไม่โยนต่อ
+            Diag.Warn("MainForm.OnAlertReceived", "แสดงบอลลูนแจ้งเตือนที่ถาดระบบไม่สำเร็จ", ex);
+        }
     }
 
     private void ShowToast(string title, string text, string kind)

@@ -31,7 +31,7 @@ internal sealed class RemoteForm : Form
         Size = new Size(1280, 800);
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
-        Font = new Font("Tahoma", 9);
+        Font = DiscordTheme.FontUi;
 
         _pic = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
 

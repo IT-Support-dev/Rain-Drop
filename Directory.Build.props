@@ -1,0 +1,13 @@
+<Project>
+
+  <!--
+    กติกาคุณภาพกลางของทุกโปรเจกต์ในโซลูชัน (เฟส B ข้อ 7)
+    - TreatWarningsAsErrors: ห้ามมี warning ค้าง ถ้าแก้ไม่ได้ต้องรายงานเป็นรายการ
+    - Nullable: เปิดทั้งโซลูชันให้ตรงกัน (เดิมเปิดรายโปรเจกต์อยู่แล้ว)
+  -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

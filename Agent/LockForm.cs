@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using RainDrop.Shared;
 using static RainDrop.Agent.NativeMethods;
 
 namespace RainDrop.Agent;
@@ -30,7 +31,7 @@ internal sealed class LockForm : Form
         {
             Dock = DockStyle.Fill,
             ForeColor = Color.White,
-            Font = new Font("Tahoma", 32, FontStyle.Bold),
+            Font = DiscordTheme.FontLockScreen,
             TextAlign = ContentAlignment.MiddleCenter,
             Text = text,
         };

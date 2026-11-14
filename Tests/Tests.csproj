@@ -1,7 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!--
+      ต้องเป็น net8.0-windows เพราะเทสต์เฟส B อ้างอิง Agent (WinForms) และ AgentService เพื่อทดสอบ
+      AgentConfig.VerifyPassword กับ HostsBlocker.ToHost/BuildBlock ผ่าน InternalsVisibleTo
+      (โปรเจกต์ net8.0 ล้วนอ้างอิงโปรเจกต์ net8.0-windows ไม่ได้) => CI จึงต้องรันบน windows-latest
+    -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -20,8 +26,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- ทดสอบเฉพาะตรรกะที่ไม่ผูก Windows จึงอ้างอิง Core โดยตรง (ไม่อ้างอิง Shared ที่เป็น WinForms) -->
     <ProjectReference Include="..\Core\Core.csproj" />
+    <ProjectReference Include="..\Agent\Agent.csproj" />
+    <ProjectReference Include="..\AgentService\AgentService.csproj" />
   </ItemGroup>
 
 </Project>

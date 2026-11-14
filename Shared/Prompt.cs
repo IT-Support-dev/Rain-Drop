@@ -16,7 +16,7 @@ public static class Prompt
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(12),
-            Font = new Font("Tahoma", 9),
+            Font = DiscordTheme.FontUi,   // ใช้ฟอนต์ร่วม (เดิม new Font ทุกครั้งที่เปิด แล้วไม่ Dispose)
         };
 
         var table = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Fill };

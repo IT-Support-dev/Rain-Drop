@@ -71,7 +71,12 @@ internal sealed class AgentConfig
             if (File.Exists(ConfigPath))
                 return JsonSerializer.Deserialize<AgentConfig>(File.ReadAllText(ConfigPath)) ?? new AgentConfig();
         }
-        catch { /* ใช้ค่าเริ่มต้น */ }
+        catch (Exception ex)
+        {
+            // อ่าน agent.json ไม่ได้ = พอร์ต/รหัสผ่าน/ที่อยู่ Hub ที่ตั้งตอนติดตั้งหายไปทั้งหมด
+            // ยังต้องเปิดโปรแกรมต่อได้ แต่ต้องมีร่องรอยให้ตรวจสอบว่าทำไมค่าตั้งไม่ตรง
+            Diag.Error("AgentConfig.Load", $"อ่านค่าตั้งที่ '{ConfigPath}' ไม่สำเร็จ จึงใช้ค่าเริ่มต้น", ex);
+        }
         return new AgentConfig();
     }
 
@@ -147,14 +152,22 @@ internal sealed class CommunitySettings
             if (File.Exists(PathOnDisk))
                 return JsonSerializer.Deserialize<CommunitySettings>(File.ReadAllText(PathOnDisk)) ?? new CommunitySettings { HubAddress = defaultHub };
         }
-        catch { /* ใช้ค่าเริ่มต้น */ }
+        catch (Exception ex)
+        {
+            // ค่าที่ผู้ใช้ตั้งเองหาย จึงถอยไปใช้ค่าที่ผู้ดูแลกำหนดตอนติดตั้ง (พฤติกรรมเดิม) แต่บันทึกไว้
+            Diag.Warn("CommunitySettings.Load", "อ่านค่าตั้งห้องชุมชนไม่สำเร็จ จึงใช้ค่าเริ่มต้น", ex);
+        }
         return new CommunitySettings { HubAddress = defaultHub };
     }
 
     public void Save()
     {
         try { File.WriteAllText(PathOnDisk, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })); }
-        catch { /* เขียนไม่ได้ */ }
+        catch (Exception ex)
+        {
+            // บันทึกไม่ได้ = ค่าที่ผู้ใช้เพิ่งตั้งจะหายเมื่อเปิดใหม่ ไม่ควรล้มทั้งหน้าต่าง จึงบันทึกแทน
+            Diag.Warn("CommunitySettings.Save", "บันทึกค่าตั้งห้องชุมชนไม่สำเร็จ", ex);
+        }
     }
 }
 
@@ -293,7 +306,14 @@ internal sealed class AgentContext : ApplicationContext
 
         // บอก Service ว่าให้หยุดปลุก: เขียน token ที่ได้รับตอนถูกเปิด
         string token = Environment.GetEnvironmentVariable("RAINDROP_STOP_TOKEN") ?? "";
-        try { File.WriteAllText(AgentConfig.StopSignalPath, token); } catch { /* ไม่เป็นไร */ }
+        try { File.WriteAllText(AgentConfig.StopSignalPath, token); }
+        catch (Exception ex)
+        {
+            // สำคัญ: เขียนสัญญาณหยุดไม่ได้ = Service จะปลุก Agent กลับมาทันทีทั้งที่ผู้ใช้ใส่รหัสถูกแล้ว
+            // ยังต้องปิดโปรเซสตามคำสั่งผู้ใช้ต่อ แต่ต้องบันทึกสาเหตุไว้ให้ตรวจสอบ
+            Diag.Error("AgentContext.RequestExit",
+                $"เขียนไฟล์สัญญาณหยุดที่ '{AgentConfig.StopSignalPath}' ไม่สำเร็จ Service จะปลุก Agent กลับมา", ex);
+        }
 
         _tray.Visible = false;
         ExitThread();

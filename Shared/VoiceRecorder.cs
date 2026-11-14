@@ -48,7 +48,13 @@ public sealed class VoiceRecorder : IDisposable
         {
             Mci($"close {Alias}", throwOnError: false);
             IsRecording = false;
-            try { File.Delete(path); } catch { /* ไม่เป็นไร */ }
+            try { File.Delete(path); }
+            catch
+            {
+                // จงใจเพิกเฉย: ไฟล์ชั่วคราวใน %TEMP% ที่ลบไม่ได้ (อาจยังถูกเปิดค้าง)
+                // ข้อมูลเสียงถูกอ่านคืนไปแล้ว การโยนที่นี่จะทับผลลัพธ์ที่ผู้ใช้ต้องการทิ้ง
+                // Windows เป็นตัวล้าง %TEMP% อยู่แล้ว
+            }
         }
     }
 
