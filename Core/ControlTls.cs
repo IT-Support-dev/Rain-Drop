@@ -164,7 +164,9 @@ public sealed class ControlTlsPolicy
     {
         reason = "certificate-rejected";
         if (certificate is null) { reason = "missing-certificate"; return false; }
-        using var leaf = certificate as X509Certificate2 ?? new X509Certificate2(certificate);
+        // Copy the raw certificate: the callback receives a handle owned by SslStream,
+        // and disposing it here would invalidate SslStream.RemoteCertificate.
+        using var leaf = new X509Certificate2(certificate.RawData);
         if (_revoked.IsRevoked(RepoCertificates.Serial(leaf))) { reason = "revoked-certificate"; return false; }
         var now = DateTime.UtcNow;
         if (leaf.NotBefore.ToUniversalTime() > now || leaf.NotAfter.ToUniversalTime() <= now)
