@@ -118,6 +118,12 @@ internal sealed class Worker : BackgroundService
 
     private void TryDeleteSignal()
     {
-        try { if (File.Exists(_stopSignal)) File.Delete(_stopSignal); } catch { /* ไม่เป็นไร */ }
+        try { if (File.Exists(_stopSignal)) File.Delete(_stopSignal); }
+        catch (Exception ex)
+        {
+            // ลบไม่ได้ไม่กระทบความปลอดภัย: ShouldStop เทียบ token ของรอบนี้เท่านั้น
+            // ไฟล์เก่าจึงใช้หยุดรอบปัจจุบันไม่ได้อยู่แล้ว แต่บันทึกไว้เพื่อความสะดวกตอนดีบัก
+            _log.LogDebug(ex, "ลบไฟล์สัญญาณหยุดเก่าไม่สำเร็จ");
+        }
     }
 }

@@ -13,11 +13,18 @@ namespace RainDrop.Agent;
 internal sealed class BlockEnforcer : IDisposable
 {
     private readonly object _gate = new();
+
+    /// <summary>
+    /// ล็อกแยกสำหรับสถานะกันสแปมแจ้งเตือน: Enforce() ถูกเรียกทั้งจาก timer (thread pool)
+    /// และจาก SetRules() (thread ของ packet handler) จึงแก้ HashSet/DateTime ตัวนี้พร้อมกันได้
+    /// ใช้ล็อกแยกจาก _gate เพื่อไม่ต้องถือ _gate ตอนยิง Alert ออกไปข้างนอก
+    /// </summary>
+    private readonly object _alertGate = new();
+
     private readonly System.Threading.Timer _timer;
     private HashSet<string> _programs = new(StringComparer.OrdinalIgnoreCase);
-    private List<string> _urls = new();
-    private DateTime _lastAlertReset = DateTime.Now;
-    private readonly HashSet<string> _alertedRecently = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime _lastAlertReset = DateTime.Now;                       // guarded by _alertGate
+    private readonly HashSet<string> _alertedRecently = new(StringComparer.OrdinalIgnoreCase); // guarded by _alertGate
 
     public event Action<AlertMsg>? Alert;
 
@@ -34,7 +41,11 @@ internal sealed class BlockEnforcer : IDisposable
                 if (r is not null) ApplyRules(r);
             }
         }
-        catch { /* ใช้ค่าว่าง */ }
+        catch (Exception ex)
+        {
+            // ถ้าอ่านไฟล์ไม่ได้ = รายการบล็อกที่ผู้ดูแลตั้งไว้หายไปเงียบ ๆ ต้องมีร่องรอยให้ตรวจสอบ
+            Diag.Warn("BlockEnforcer", $"อ่านรายการบล็อกที่ '{BlocklistPath}' ไม่สำเร็จ จึงเริ่มด้วยรายการว่าง", ex);
+        }
 
         _timer = new System.Threading.Timer(_ => Enforce(), null, 2000, 2000);
     }
@@ -47,7 +58,12 @@ internal sealed class BlockEnforcer : IDisposable
             Directory.CreateDirectory(AgentConfig.SharedFolder);
             File.WriteAllText(BlocklistPath, JsonSerializer.Serialize(rules, new JsonSerializerOptions { WriteIndented = true }));
         }
-        catch { /* เขียนไม่ได้: อย่างน้อยการบล็อกโปรแกรมยังทำงาน */ }
+        catch (Exception ex)
+        {
+            // เขียนไม่ได้ = Service มองไม่เห็นรายการเว็บที่ต้องบล็อก และรายการจะหายเมื่อ Agent รีสตาร์ท
+            // การบล็อกโปรแกรมในหน่วยความจำยังทำงาน จึงไม่โยนต่อ แต่ต้องบันทึกให้เห็นว่าเว็บไม่ถูกบล็อก
+            Diag.Error("BlockEnforcer", $"เขียนรายการบล็อกที่ '{BlocklistPath}' ไม่สำเร็จ การบล็อกเว็บผ่าน hosts จะไม่อัปเดต", ex);
+        }
         Enforce(); // ปิดโปรแกรมที่ถูกบล็อกทันทีไม่ต้องรอรอบถัดไป
     }
 
@@ -60,7 +76,8 @@ internal sealed class BlockEnforcer : IDisposable
                 .Where(p => p.Length > 0)
                 .Select(p => p.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? p[..^4] : p)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            _urls = rules.Urls.Select(u => u.Trim()).Where(u => u.Length > 0).ToList();
+            // หมายเหตุ: ไม่ต้องเก็บ rules.Urls ไว้ในหน่วยความจำ เพราะ Agent ไม่ได้บังคับใช้เอง
+            // URLs ถูกเขียนลง blocklist.json ใน SetRules ให้ AgentService (สิทธิ์ SYSTEM) นำไปแก้ hosts
         }
     }
 
@@ -71,10 +88,14 @@ internal sealed class BlockEnforcer : IDisposable
         if (programs.Length == 0) return;
 
         // รีเซ็ตรายการที่เพิ่งแจ้งเตือนทุก 30 วินาที กันสแปม
-        if ((DateTime.Now - _lastAlertReset).TotalSeconds > 30)
+        // ต้องล็อก: Enforce อาจถูกเรียกซ้อนจาก timer และ SetRules พร้อมกัน
+        lock (_alertGate)
         {
-            _alertedRecently.Clear();
-            _lastAlertReset = DateTime.Now;
+            if ((DateTime.Now - _lastAlertReset).TotalSeconds > 30)
+            {
+                _alertedRecently.Clear();
+                _lastAlertReset = DateTime.Now;
+            }
         }
 
         foreach (var name in programs)
@@ -87,11 +108,33 @@ internal sealed class BlockEnforcer : IDisposable
             foreach (var p in procs)
             {
                 try { p.Kill(); killed = true; }
-                catch { /* ปิดไม่ได้ (สิทธิ์สูงกว่า) */ }
+                catch (Exception ex)
+                {
+                    // ปิดไม่ได้: โปรเซสสิทธิ์สูงกว่า หรือจบเองไปก่อนแล้ว (แข่งกันระหว่าง enumerate กับ Kill)
+                    // ยังบล็อกโปรเซสอื่นต่อได้ จึงไม่โยน แต่บันทึกไว้เพราะแปลว่าบล็อกไม่สำเร็จจริง
+                    Diag.Warn("BlockEnforcer.Enforce", $"ปิดโปรแกรมที่ถูกบล็อก '{name}' (PID {SafePid(p)}) ไม่สำเร็จ", ex);
+                }
                 finally { p.Dispose(); }
             }
-            if (killed && _alertedRecently.Add(name))
-                Alert?.Invoke(new AlertMsg("บล็อกโปรแกรม", $"ปิดโปรแกรมที่ถูกบล็อก: {name}", DateTime.Now));
+            if (killed)
+            {
+                // ล็อกเฉพาะตอนแก้ HashSet แล้วค่อยยิง event ข้างนอกล็อก (คง short-circuit เดิม: Add เฉพาะเมื่อ killed)
+                bool firstAlert;
+                lock (_alertGate) firstAlert = _alertedRecently.Add(name);
+                if (firstAlert)
+                    Alert?.Invoke(new AlertMsg("บล็อกโปรแกรม", $"ปิดโปรแกรมที่ถูกบล็อก: {name}", DateTime.Now));
+            }
+        }
+    }
+
+    /// <summary>อ่าน PID แบบไม่โยน (โปรเซสอาจจบไปแล้วตอนกำลังจะบันทึก log)</summary>
+    private static string SafePid(Process p)
+    {
+        try { return p.Id.ToString(); }
+        catch
+        {
+            // จงใจเพิกเฉย: ใช้เพื่อประกอบการบันทึกเท่านั้น โปรเซสที่จบแล้วอ่าน Id ไม่ได้ ไม่ใช่ความผิดพลาด
+            return "?";
         }
     }
 

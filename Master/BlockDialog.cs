@@ -18,7 +18,7 @@ internal static class BlockDialog
             MaximizeBox = false,
             ShowInTaskbar = false,
             ClientSize = new Size(560, 440),
-            Font = new Font("Tahoma", 9),
+            Font = DiscordTheme.FontUi,
             BackColor = DiscordTheme.Content,
             ForeColor = DiscordTheme.TextNormal,
         };
@@ -26,13 +26,13 @@ internal static class BlockDialog
         Label Head(string t, int y) => new()
         {
             Text = t, AutoSize = true, Location = new Point(14, y),
-            ForeColor = DiscordTheme.TextMuted, Font = new Font("Tahoma", 8.5f, FontStyle.Bold),
+            ForeColor = DiscordTheme.TextMuted, Font = DiscordTheme.FontSmallBold,
         };
 
         TextBox Box(int y, string value) => new()
         {
             Location = new Point(14, y), Size = new Size(532, 130), Multiline = true,
-            ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 10),
+            ScrollBars = ScrollBars.Vertical, Font = DiscordTheme.FontMono,
             BackColor = DiscordTheme.Sidebar, ForeColor = DiscordTheme.TextNormal,
             BorderStyle = BorderStyle.FixedSingle, Text = value,
         };
@@ -48,7 +48,7 @@ internal static class BlockDialog
         var note = new Label
         {
             Location = new Point(14, 334), Size = new Size(532, 36),
-            ForeColor = DiscordTheme.TextMuted, Font = new Font("Tahoma", 8),
+            ForeColor = DiscordTheme.TextMuted, Font = DiscordTheme.FontTiny,
             Text = "โปรแกรมที่ถูกบล็อกจะถูกปิดทันทีถ้าเปิดขึ้น • การบล็อกเว็บทำผ่านไฟล์ hosts โดย Service (ต้องติดตั้งแบบมี Service)",
         };
         form.Controls.Add(note);

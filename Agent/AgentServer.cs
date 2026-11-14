@@ -73,7 +73,11 @@ internal sealed class AgentServer
             _ = Task.Run(async () =>
             {
                 try { await session.SendAsync(type, payload); }
-                catch { /* การเชื่อมต่อนี้หลุดไปแล้ว */ }
+                catch
+                {
+                    // จงใจเพิกเฉย: ส่งให้ Master ตัวนี้ไม่ได้เพราะสายหลุด
+                    // ลูปอ่านของ session นั้นจะจบและถอดออกจาก _sessions เอง จึงไม่ต้องจัดการซ้ำที่นี่
+                }
             });
         }
         return count;
@@ -242,7 +246,11 @@ internal sealed class AgentServer
                         UseShellExecute = true, // ทำให้เปิด URL ด้วยเบราว์เซอร์เริ่มต้นได้
                     });
                 }
-                catch { /* ไม่พบโปรแกรม ฯลฯ */ }
+                catch (Exception ex)
+                {
+                    // Master สั่งเปิดโปรแกรม/URL แล้วเปิดไม่ได้ ผู้ดูแลควรทราบว่าคำสั่งไม่สำเร็จ
+                    Diag.Warn("AgentServer.RunCommand", $"เปิด '{run.Target}' ไม่สำเร็จ", ex);
+                }
                 break;
             }
         }

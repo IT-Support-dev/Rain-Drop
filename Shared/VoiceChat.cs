@@ -54,7 +54,12 @@ public sealed class VoiceChat : IDisposable
         if (Muted || !Active) return;
         var pcm = new byte[e.BytesRecorded];
         Array.Copy(e.Buffer, pcm, e.BytesRecorded);
-        try { _onCaptured(pcm); } catch { /* การเชื่อมต่อขาด */ }
+        try { _onCaptured(pcm); }
+        catch
+        {
+            // จงใจเพิกเฉย: callback ส่งเสียงเข้าเครือข่าย การเชื่อมต่อขาดเป็นเรื่องปกติระหว่างคอล
+            // และนี่คือ callback ของอุปกรณ์เสียงที่โยนกลับไม่ได้ ลูปอ่านของ HubClient จัดการตัดสายเอง
+        }
     }
 
     /// <summary>มีเสียงจากสมาชิกคนหนึ่งเข้ามา เพิ่มเข้า buffer ของคนนั้นเพื่อนำไปผสม</summary>
@@ -84,13 +89,22 @@ public sealed class VoiceChat : IDisposable
             if (_mic is not null)
             {
                 _mic.DataAvailable -= OnMicData;
-                try { _mic.StopRecording(); } catch { }
+                try { _mic.StopRecording(); }
+                catch
+                {
+                    // จงใจเพิกเฉย: กำลังปิดระบบเสียง อุปกรณ์อาจถูกถอดหรือปิดไปแล้ว ทำให้ StopRecording โยน
+                    // บรรทัดถัดไป Dispose อยู่แล้ว การโยนต่อจะทำให้ speaker ไม่ถูกปิดและรั่วแทน
+                }
                 _mic.Dispose();
                 _mic = null;
             }
             if (_speaker is not null)
             {
-                try { _speaker.Stop(); } catch { }
+                try { _speaker.Stop(); }
+                catch
+                {
+                    // จงใจเพิกเฉย: เหตุผลเดียวกับ StopRecording ด้านบน ต้องเดินต่อให้ถึง Dispose เสมอ
+                }
                 _speaker.Dispose();
                 _speaker = null;
             }

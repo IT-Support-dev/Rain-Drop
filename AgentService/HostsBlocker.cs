@@ -34,7 +34,7 @@ internal static class HostsBlocker
 
     public static void Sync(Action<string> log)
     {
-        List<string> domains = LoadDomains();
+        List<string> domains = LoadDomains(log);
         string block = BuildBlock(domains);
         if (block == _lastApplied) return;
 
@@ -51,7 +51,7 @@ internal static class HostsBlocker
         }
     }
 
-    private static List<string> LoadDomains()
+    private static List<string> LoadDomains(Action<string> log)
     {
         var domains = new List<string>();
         try
@@ -66,12 +66,17 @@ internal static class HostsBlocker
                 if (!host.StartsWith("www.")) domains.Add("www." + host);
             }
         }
-        catch { /* อ่าน/แปลงไม่ได้ */ }
+        catch (Exception ex)
+        {
+            // อันตรายถ้าเงียบ: อ่านรายการไม่ได้ => ได้รายการว่าง => BuildBlock("") => ลบทุกโดเมนออกจาก hosts
+            // เท่ากับเว็บที่เคยบล็อกถูกปลดโดยไม่มีใครสั่ง จึงต้องแจ้งเข้า log ของ Service เสมอ
+            log("อ่านรายการบล็อกเว็บไม่สำเร็จ รอบนี้อาจปลดบล็อกเว็บชั่วคราว: " + ex.Message);
+        }
         return domains.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>ตัด scheme, path, พอร์ต ออกให้เหลือแต่โดเมน เช่น "https://www.facebook.com/x" -> "www.facebook.com"</summary>
-    private static string ToHost(string raw)
+    internal static string ToHost(string raw)
     {
         string s = raw.Trim();
         int scheme = s.IndexOf("://", StringComparison.Ordinal);
@@ -83,7 +88,7 @@ internal static class HostsBlocker
         return s.Trim().ToLowerInvariant();
     }
 
-    private static string BuildBlock(List<string> domains)
+    internal static string BuildBlock(List<string> domains)
     {
         if (domains.Count == 0) return "";
         var sb = new StringBuilder();
@@ -122,6 +127,10 @@ internal static class HostsBlocker
         {
             Process.Start(new ProcessStartInfo("ipconfig", "/flushdns") { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit(5000);
         }
-        catch { /* ไม่เป็นไร */ }
+        catch
+        {
+            // จงใจเพิกเฉย: ipconfig /flushdns เป็นเพียงการเร่งให้ค่าใหม่มีผลเร็วขึ้น
+            // ไฟล์ hosts ถูกเขียนไปแล้วก่อนหน้า Windows จะอ่านค่าใหม่เองเมื่อ cache หมดอายุ
+        }
     }
 }

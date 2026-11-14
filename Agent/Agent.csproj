@@ -16,6 +16,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- เปิดให้โปรเจกต์เทสต์เรียกชนิดและเมธอดภายในได้ โดยไม่ต้องเปลี่ยน access modifier เป็น public -->
+    <InternalsVisibleTo Include="RainDrop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- ฝังไอคอนไว้ในโปรแกรม เพื่อโหลดใช้กับ NotifyIcon ได้โดยไม่ต้องมีไฟล์ .ico แยก -->
     <EmbeddedResource Include="..\assets\raindrop.ico" Link="raindrop.ico" />
   </ItemGroup>

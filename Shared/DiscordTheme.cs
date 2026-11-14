@@ -20,6 +20,33 @@ public static class DiscordTheme
     public static readonly Color Hover = Color.FromArgb(53, 55, 60);         // ไฮไลต์ตอนชี้เมาส์
     public static readonly Color Selected = Color.FromArgb(64, 68, 75);      // แถวที่ถูกเลือก
 
+    // ---------- ฟอนต์ที่ใช้ร่วมกัน (แก้ GDI handle leak) ----------
+    // เดิมทุกจุดเรียก new Font(...) แล้วไม่เคย Dispose โดยเฉพาะใน Paint/ลูปรีเฟรช
+    // จึงสร้าง GDI handle ใหม่เรื่อย ๆ ตอนนี้ cache ไว้ชุดเดียวตลอดอายุโปรเซส
+    // จงใจไม่ Dispose: เป็นชุดคงที่จำนวนน้อย ใช้ร่วมกันทุกฟอร์ม และ Control ไม่ได้เป็นเจ้าของ Font
+    // (Control.Dispose ไม่ Dispose ฟอนต์ที่ assign ให้) จึงปลอดภัยที่จะแชร์
+    public static readonly Font FontUi = new("Tahoma", 9);
+    public static readonly Font FontUiBold = new("Tahoma", 9, FontStyle.Bold);
+    public static readonly Font FontSmall = new("Tahoma", 8.5f);
+    public static readonly Font FontSmallBold = new("Tahoma", 8.5f, FontStyle.Bold);
+    public static readonly Font FontTiny = new("Tahoma", 8);
+    public static readonly Font FontTinyBold = new("Tahoma", 8, FontStyle.Bold);
+    public static readonly Font FontMedium = new("Tahoma", 9.5f);
+    public static readonly Font FontMediumBold = new("Tahoma", 9.5f, FontStyle.Bold);
+    public static readonly Font FontChat = new("Tahoma", 10);
+    public static readonly Font FontSubTitleBold = new("Tahoma", 10.5f, FontStyle.Bold);
+    public static readonly Font FontHeaderBold = new("Tahoma", 11, FontStyle.Bold);
+    public static readonly Font FontServerInitials = new("Tahoma", 12, FontStyle.Bold);
+    public static readonly Font FontTitleBold = new("Tahoma", 13, FontStyle.Bold);
+    public static readonly Font FontMono = new("Consolas", 10);
+    public static readonly Font FontLockScreen = new("Tahoma", 32, FontStyle.Bold);
+
+    /// <summary>
+    /// ToolTip ตัวเดียวใช้ร่วมกันทุกคอนโทรล (เดิม new ToolTip() ทุกครั้งที่สร้างไอคอน แล้วไม่ Dispose)
+    /// ToolTip เป็น Component ที่สร้าง native window จึงต้องมีตัวเดียวตลอดอายุโปรเซส
+    /// </summary>
+    private static readonly ToolTip SharedToolTip = new();
+
     /// <summary>ปุ่มแบบ Discord: พื้นสีน้ำเงิน blurple ไม่มีขอบ</summary>
     public static Button PrimaryButton(string text)
     {
@@ -29,7 +56,7 @@ public static class DiscordTheme
             FlatStyle = FlatStyle.Flat,
             BackColor = Blurple,
             ForeColor = TextBright,
-            Font = new Font("Tahoma", 9, FontStyle.Bold),
+            Font = FontUiBold,
             Cursor = Cursors.Hand,
             AutoSize = false,
         };
@@ -47,7 +74,7 @@ public static class DiscordTheme
             FlatStyle = FlatStyle.Flat,
             BackColor = Content,
             ForeColor = TextMuted,
-            Font = new Font("Tahoma", 8.5f),
+            Font = FontSmall,
             Cursor = Cursors.Hand,
             AutoSize = true,
             Margin = new Padding(2, 4, 2, 4),
@@ -70,11 +97,12 @@ public static class DiscordTheme
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using var brush = new SolidBrush(color);
             e.Graphics.FillEllipse(brush, 0, 0, 47, 47);
-            TextRenderer.DrawText(e.Graphics, initials, new Font("Tahoma", 12, FontStyle.Bold),
+            // ใช้ฟอนต์ที่ cache ไว้ (เดิม new Font ทุกครั้งที่ Paint = GDI handle รั่วทุกครั้ง redraw)
+            TextRenderer.DrawText(e.Graphics, initials, FontServerInitials,
                 new Rectangle(0, 0, 48, 48), TextBright,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         };
-        if (tooltip is not null) new ToolTip().SetToolTip(p, tooltip);
+        if (tooltip is not null) SharedToolTip.SetToolTip(p, tooltip);
         return p;
     }
 }

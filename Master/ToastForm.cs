@@ -25,7 +25,7 @@ internal sealed class ToastForm : Form
             Height = 26,
             Text = "🔔  " + title,
             ForeColor = Color.White,
-            Font = new Font("Tahoma", 9.5f, FontStyle.Bold),
+            Font = DiscordTheme.FontMediumBold,
             Padding = new Padding(10, 6, 8, 0),
         };
         var textLabel = new Label
@@ -33,7 +33,7 @@ internal sealed class ToastForm : Form
             Dock = DockStyle.Fill,
             Text = text,
             ForeColor = DiscordTheme.TextNormal,
-            Font = new Font("Tahoma", 9),
+            Font = DiscordTheme.FontUi,
             Padding = new Padding(12, 0, 8, 6),
             AutoEllipsis = true,
         };

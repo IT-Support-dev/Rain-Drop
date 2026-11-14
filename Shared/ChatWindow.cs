@@ -22,7 +22,8 @@ public sealed class ChatWindow : Form
     private readonly Func<string, bool> _onSend;
     private readonly Func<VoiceMsg, bool>? _onSendVoice;
     private readonly string _myName;
-    private readonly Font _boldFont;
+    // ฟอนต์ตัวหนาใช้ของกองกลาง (DiscordTheme) จึงไม่ใช่เจ้าของ ห้าม Dispose
+    // ส่วน _italicFont สร้างจากฟอนต์ของฟอร์มเองต่อหนึ่งหน้าต่าง จึงต้อง Dispose ตอนปิด
     private readonly Font _italicFont;
     private readonly List<Label> _textLabels = new();
 
@@ -49,8 +50,7 @@ public sealed class ChatWindow : Form
         Size = new Size(460, 580);
         MinimumSize = new Size(360, 320);
         StartPosition = FormStartPosition.CenterScreen;
-        Font = new Font("Tahoma", 10);
-        _boldFont = new Font("Tahoma", 8.5f, FontStyle.Bold);
+        Font = DiscordTheme.FontChat;
         _italicFont = new Font(Font, FontStyle.Italic);
 
         _list = new FlowLayoutPanel
@@ -331,7 +331,7 @@ public sealed class ChatWindow : Form
         {
             AutoSize = true,
             Text = $"{sender}   {time:HH:mm}",
-            Font = _boldFont,
+            Font = DiscordTheme.FontSmallBold,
             ForeColor = mine ? Color.SteelBlue : Color.SeaGreen,
             UseMnemonic = false,
             Margin = new Padding(0, 0, 0, 4),
@@ -409,7 +409,6 @@ public sealed class ChatWindow : Form
             _recordTimer.Dispose();
             _playTimer.Dispose();
             _recorder.Dispose();
-            _boldFont.Dispose();
             _italicFont.Dispose();
         }
         base.Dispose(disposing);
