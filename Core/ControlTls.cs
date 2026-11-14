@@ -26,16 +26,32 @@ public static class ControlTls
 {
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// Windows Schannel rejects ephemeral ECDSA keys ("platform does not support ephemeral keys").
+    /// Re-import the same key through a password-protected in-memory PFX with DefaultKeySet so
+    /// Schannel gets a usable key container. This does NOT add the certificate to any trust store;
+    /// the temporary key is released when the returned certificate is disposed.
+    /// </summary>
+    public static X509Certificate2 CreateSchannelCertificate(X509Certificate2 source)
+    {
+        if (!OperatingSystem.IsWindows()) return new X509Certificate2(source.RawData).CopyWithPrivateKey(source.GetECDsaPrivateKey()!);
+        string password = Guid.NewGuid().ToString("N");
+        byte[] pfx = source.Export(X509ContentType.Pfx, password);
+        try { return new X509Certificate2(pfx, password, X509KeyStorageFlags.DefaultKeySet | X509KeyStorageFlags.Exportable); }
+        finally { Array.Clear(pfx); }
+    }
+
     public static async Task<SslStream> AuthenticateServerAsync(Stream inner, X509Certificate2 certificate,
         ControlTlsPolicy policy, CancellationToken ct)
     {
         var ssl = new SslStream(inner, false);
         string reason = "handshake-failed";
+        using var local = CreateSchannelCertificate(certificate);
         try
         {
             var options = new SslServerAuthenticationOptions
             {
-                ServerCertificate = certificate,
+                ServerCertificate = local,
                 ClientCertificateRequired = true,
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                 CertificateChainPolicy = policy.ChainPolicy(),
@@ -66,13 +82,14 @@ public static class ControlTls
     {
         var ssl = new SslStream(inner, false);
         string reason = "handshake-failed";
+        using var local = CreateSchannelCertificate(certificate);
         try
         {
             var options = new SslClientAuthenticationOptions
             {
                 TargetHost = targetHost,
-                ClientCertificates = new X509CertificateCollection { certificate },
-                LocalCertificateSelectionCallback = (_, _, _, _, _) => certificate,
+                ClientCertificates = new X509CertificateCollection { local },
+                LocalCertificateSelectionCallback = (_, _, _, _, _) => local,
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                 CertificateChainPolicy = policy.ChainPolicy(),
                 EnabledSslProtocols = SslProtocols.None,
