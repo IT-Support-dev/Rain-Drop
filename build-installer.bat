@@ -35,17 +35,20 @@ echo [2/5] Build Master...
 echo [3/5] Build Hub (เซิร์ฟเวอร์กลาง)...
 "%DOTNET%" publish Hub\Hub.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish\Hub || goto :err
 
-REM ---------- [4] คู่กุญแจ ----------
-echo [4/5] เตรียมคู่กุญแจ...
-if exist keys\master-private.pem (
-  echo       ใช้กุญแจเดิมในโฟลเดอร์ keys
+REM ---------- [4] กุญแจสาธารณะ (ไม่สร้าง/แจกกุญแจลับตอน build อีกต่อไป - เฟส C1) ----------
+echo [4/5] เตรียมกุญแจสาธารณะ...
+REM Master สร้างคู่กุญแจเองตอนเปิดครั้งแรก เก็บกุญแจลับเข้ารหัส DPAPI ที่ %%AppData%%\RainDrop
+REM ตัวติดตั้งไม่ฝังกุญแจใด ๆ: ผู้ติดตั้งเครื่องลูกเลือก master-public.pem เองตอนติดตั้ง
+REM ส่วน Hub ต้องใช้กุญแจสาธารณะชุดเดียวกัน: export จาก Master แล้ววางที่ keys\master-public.pem
+if exist keys\master-public.pem (
+  copy /y keys\master-public.pem publish\Hub\hub-key.pem >nul
+  echo       ใช้กุญแจสาธารณะจาก keys\master-public.pem สำหรับ Hub
 ) else (
-  start "" /wait publish\Master\RainDrop.Master.exe --generate-keys "%~dp0keys"
-  if not exist keys\master-private.pem goto :err
-  echo       สร้างกุญแจใหม่ในโฟลเดอร์ keys แล้ว  ** สำรองโฟลเดอร์ keys ไว้ในที่ปลอดภัย **
+  echo       [ข้าม] ไม่พบ keys\master-public.pem - Hub จะยังไม่มี hub-key.pem
+  echo       วิธีเตรียม: เปิด Master ครั้งแรก แล้วรัน
+  echo         publish\Master\RainDrop.Master.exe --export-public-key "%~dp0keys"
+  echo       หรือคัดลอก %%AppData%%\RainDrop\master-public.pem มาไว้ที่ keys\master-public.pem
 )
-REM กุญแจชุมชนของ Hub (ลายนิ้วมือต้องตรงกับ Agent/Master)
-copy /y keys\master-public.pem publish\Hub\hub-key.pem >nul
 copy /y Hub\run-hub.bat publish\Hub\ >nul
 
 REM ---------- [5] ตัวติดตั้ง ----------
@@ -57,7 +60,7 @@ echo.
 echo ================================================
 echo  สำเร็จ!
 echo   ตัวติดตั้ง (installer-output):
-echo    - RainDrop-Master-Setup.exe : เครื่องผู้ดูแล (ห้ามแจกจ่าย)
+echo    - RainDrop-Master-Setup.exe : เครื่องผู้ดูแล (ไม่มีกุญแจลับฝังอยู่แล้ว)
 echo    - RainDrop-Agent-Setup.exe  : เครื่องลูกทุกเครื่อง
 echo   เซิร์ฟเวอร์ชุมชน (รันบนเครื่องที่เปิดตลอด):
 echo    - publish\Hub\RainDrop.Hub.exe  (ดับเบิลคลิกเพื่อเปิด)

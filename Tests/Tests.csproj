@@ -3,7 +3,7 @@
   <PropertyGroup>
     <!--
       ต้องเป็น net8.0-windows เพราะเทสต์เฟส B อ้างอิง Agent (WinForms) และ AgentService เพื่อทดสอบ
-      AgentConfig.VerifyPassword กับ HostsBlocker.ToHost/BuildBlock ผ่าน InternalsVisibleTo
+      PasswordGate/KeyVault/HostsBlocker.ToHost/BuildBlock ผ่าน InternalsVisibleTo
       (โปรเจกต์ net8.0 ล้วนอ้างอิงโปรเจกต์ net8.0-windows ไม่ได้) => CI จึงต้องรันบน windows-latest
     -->
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -29,6 +29,7 @@
     <ProjectReference Include="..\Core\Core.csproj" />
     <ProjectReference Include="..\Agent\Agent.csproj" />
     <ProjectReference Include="..\AgentService\AgentService.csproj" />
+    <ProjectReference Include="..\Master\Master.csproj" />
   </ItemGroup>
 
 </Project>

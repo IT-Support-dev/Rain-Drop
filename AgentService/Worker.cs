@@ -9,68 +9,94 @@ namespace RainDrop.AgentService;
 /// หัวใจของ Service: คอยให้ RainDrop.Agent.exe ทำงานอยู่ในเซสชันของผู้ใช้ตลอดเวลา
 /// - เปิดตอนบูต/ตอนผู้ใช้ล็อกอิน
 /// - ถ้า Agent ถูกปิด (End Task ฯลฯ) จะเปิดใหม่ภายในไม่กี่วินาที
-/// - จะหยุดเปิดก็ต่อเมื่อผู้ใช้กด "ออกจากโปรแกรม" ด้วยรหัสผู้ดูแลที่ถูกต้องเท่านั้น
-///   (Agent จะเขียน token ที่ตรงกับที่ Service ส่งให้ลงไฟล์สัญญาณ)
+/// - หยุดปลุกก็ต่อเมื่อมีคำขอผ่าน named pipe พร้อมรหัสผ่านผู้ดูแลที่ Service ตรวจเองว่าถูกต้อง
+///   (ไม่ใช้ environment variable หรือไฟล์สัญญาณที่ผู้ใช้อย่าน/เขียนได้อีกต่อไป)
 /// </summary>
 internal sealed class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _log;
     private readonly string _agentExe;
-    private readonly string _stopSignal;
-
-    // token ใหม่ทุกครั้งที่ Service เริ่ม ผู้ใช้จึงปลอมไฟล์สัญญาณเองไม่ได้
-    private readonly string _stopToken = Guid.NewGuid().ToString("N");
 
     private uint _launchedSession = SessionLauncher.InvalidSession;
     private int _agentPid = -1;
+    private int _stopAuthorized;   // 0 = ยังไม่อนุญาต, 1 = ผู้ดูแลใส่รหัสถูกแล้ว
 
     public Worker(ILogger<Worker> log)
     {
         _log = log;
         _agentExe = Path.Combine(AppContext.BaseDirectory, "RainDrop.Agent.exe");
-        _stopSignal = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RainDrop", "agent-stop.signal");
     }
+
+    private void Log(string message) => _log.LogInformation("{Message}", message);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // ลบสัญญาณหยุดเก่า (จาก token รอบก่อน) ทิ้ง
-        TryDeleteSignal();
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                if (ShouldStop())
-                {
-                    _log.LogInformation("ได้รับคำสั่งออกจากโปรแกรมที่ถูกต้อง หยุดการปลุก Agent");
-                    HostsBlocker.Clear(m => _log.LogInformation("{Message}", m));
-                    TryDeleteSignal();
-                    return; // หยุด Service (จะกลับมาทำงานเองเมื่อบูตครั้งถัดไป)
-                }
-
-                EnsureAgentRunning();
-                HostsBlocker.Sync(m => _log.LogInformation("{Message}", m)); // บล็อกเว็บผ่านไฟล์ hosts
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "รอบตรวจสอบ Agent มีปัญหา");
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
-        }
-    }
-
-    /// <summary>true ถ้าไฟล์สัญญาณมี token ตรงกับของรอบนี้</summary>
-    private bool ShouldStop()
-    {
         try
         {
-            return File.Exists(_stopSignal) && File.ReadAllText(_stopSignal).Trim() == _stopToken;
+            ServiceStore.EnsureLayout(Log);
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
+            // ตั้ง ACL ไม่ได้แปลว่าไฟล์ค่าตั้งอาจถูกผู้ใช้ทั่วไปแก้ไขได้ ต้องแจ้งชัดเจนแต่ยังทำงานต่อ
+            _log.LogError(ex, "ตั้งสิทธิ์โฟลเดอร์ค่าตั้งไม่สำเร็จ ตรวจสิทธิ์ {Root} ด้วยมือ", ServiceStore.Root);
+        }
+
+        var (salt, hash) = ServiceStore.LoadCredentials(Log);
+        var gate = new PasswordGate(salt, hash);
+        if (!gate.HasPassword)
+            _log.LogWarning("ไม่พบรหัสผ่านผู้ดูแลใน {Path} จะไม่มีใครสั่งหยุด Agent ได้จนกว่าจะตั้งใหม่",
+                ServiceStore.CredentialsPath);
+
+        var pipe = new ControlPipeServer(
+            gate, Log,
+            onAuthorizedStop: () => Interlocked.Exchange(ref _stopAuthorized, 1),
+            agentPid: () => _agentPid,
+            syncHosts: () => HostsBlocker.Sync(Log));
+
+        // ใช้ CTS แยกที่ผูกกับ stoppingToken แต่ Worker ยกเลิกเองได้ตอนอนุญาตให้หยุด
+        // ถ้าใช้ stoppingToken ตรง ๆ ตอน return จะเกิด deadlock: finally รอ pipeTask
+        // แต่ pipeTask ไม่จบจนกว่า stoppingToken ถูกยกเลิก ซึ่งเกิดหลัง ExecuteAsync return เท่านั้น
+        using var pipeCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        Task pipeTask = pipe.RunAsync(pipeCts.Token);
+
+        try
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    if (Volatile.Read(ref _stopAuthorized) == 1)
+                    {
+                        Log("ได้รับคำสั่งออกจากโปรแกรมที่ตรวจรหัสผ่านแล้ว หยุดการปลุก Agent");
+                        HostsBlocker.Clear(Log);
+                        pipeCts.Cancel();   // ปิดท่อควบคุมก่อน เพื่อไม่ให้ finally ค้าง
+                        return;   // หยุด Service (จะกลับมาทำงานเองเมื่อบูตครั้งถัดไป)
+                    }
+
+                    EnsureAgentRunning();
+                    HostsBlocker.Sync(Log);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "รอบตรวจสอบ Agent มีปัญหา");
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Service ถูกสั่งหยุดโดยผู้ดูแล/ระบบ เป็นทางออกปกติ
+        }
+        finally
+        {
+            // ยกเลิกเสมอทุกทางออก (idempotent) การันตีว่า pipeTask จบก่อนรอ ไม่ให้ Service ค้างตอนหยุด
+            pipeCts.Cancel();
+            try { await pipeTask.ConfigureAwait(false); }
+            catch (OperationCanceledException)
+            {
+                // ท่อควบคุมจบตาม cancellation ที่เราสั่ง ไม่ต้องทำอะไรเพิ่ม
+            }
         }
     }
 
@@ -90,11 +116,11 @@ internal sealed class Worker : BackgroundService
 
         try
         {
-            var env = new Dictionary<string, string> { ["RAINDROP_STOP_TOKEN"] = _stopToken };
-            uint pid = SessionLauncher.LaunchInSession(session, _agentExe, env);
+            // ไม่ส่งความลับใด ๆ ผ่าน environment อีกต่อไป การขออนุญาตหยุดใช้ named pipe + รหัสผ่าน
+            uint pid = SessionLauncher.LaunchInSession(session, _agentExe, new Dictionary<string, string>());
             _launchedSession = session;
             _agentPid = (int)pid;
-            _log.LogInformation("เปิด Agent ในเซสชัน {Session} (PID {Pid})", session, pid);
+            Log($"เปิด Agent ในเซสชัน {session} (PID {pid})");
         }
         catch (Win32Exception ex)
         {
@@ -110,20 +136,15 @@ internal sealed class Worker : BackgroundService
             using var p = Process.GetProcessById(pid);
             return !p.HasExited;
         }
-        catch
+        catch (ArgumentException)
         {
+            // โปรเซสนี้ไม่มีอยู่แล้ว = ต้องเปิดใหม่ เป็นผลลัพธ์ที่ถูกต้อง ไม่ใช่ error ที่ต้องแจ้ง
             return false;
         }
-    }
-
-    private void TryDeleteSignal()
-    {
-        try { if (File.Exists(_stopSignal)) File.Delete(_stopSignal); }
-        catch (Exception ex)
+        catch (InvalidOperationException)
         {
-            // ลบไม่ได้ไม่กระทบความปลอดภัย: ShouldStop เทียบ token ของรอบนี้เท่านั้น
-            // ไฟล์เก่าจึงใช้หยุดรอบปัจจุบันไม่ได้อยู่แล้ว แต่บันทึกไว้เพื่อความสะดวกตอนดีบัก
-            _log.LogDebug(ex, "ลบไฟล์สัญญาณหยุดเก่าไม่สำเร็จ");
+            // โปรเซสจบลงระหว่างสอบถาม เช่นเดียวกับข้างบน
+            return false;
         }
     }
 }

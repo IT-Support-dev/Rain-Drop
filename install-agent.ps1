@@ -3,15 +3,21 @@
   ติดตั้ง Rain Drop Agent บนเครื่องลูกด้วยสคริปต์ (ทางเลือกแทนตัวติดตั้งสำเร็จรูป)
   ติดตั้งเป็น Windows Service ที่เปิด Agent ทุกครั้งที่บูต และปลุกกลับถ้าถูกปิด
   ตัวอย่าง:
-    .\install-agent.ps1 -PublicKey .\master-public.pem -Password mypass
-    .\install-agent.ps1 -PublicKey \\server\share\master-public.pem -Port 11400
+    .\install-agent.ps1 -PublicKey .\master-public.pem -Password MyStrongPass123
+    .\install-agent.ps1 -PublicKey \\server\share\master-public.pem -Password MyStrongPass123 -Port 11400
 #>
 param(
     [Parameter(Mandatory = $true)][string]$PublicKey,
     [string]$Source = "$PSScriptRoot\publish",
     [int]$Port = 11400,
-    [string]$Password = 'raindrop'
+    [Parameter(Mandatory = $true)][string]$Password,
+    [string]$Hub = ''
 )
+
+# บังคับรหัสผ่านอย่างน้อย 8 ตัวอักษร ไม่มีค่าเริ่มต้น 'raindrop' อีกต่อไป (เฟส C1)
+if ($Password.Length -lt 8) {
+    throw 'รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร (ระบุ -Password ให้ครบ ห้ามเว้นว่าง)'
+}
 
 $ErrorActionPreference = 'Stop'
 $svc  = 'RainDropAgentSvc'
@@ -30,8 +36,16 @@ if (Test-Path "$PSScriptRoot\diagnose-agent.ps1") { Copy-Item "$PSScriptRoot\dia
 # กุญแจสาธารณะของ Master
 Copy-Item -Path $PublicKey -Destination (Join-Path $dest 'agent-public.pem') -Force
 
-# ตั้งค่า + รหัสผ่าน (hash) สำหรับการออกจากโปรแกรม
-& (Join-Path $dest 'RainDrop.Agent.exe') --init-config "$dest" "$Password" $Port | Out-Null
+# ตั้งค่า + รหัสผ่าน (PBKDF2 hash) สำหรับการออกจากโปรแกรม
+# ค่าตั้งเก็บที่ %ProgramData%\RainDrop ซึ่งตั้ง ACL ให้ผู้ใช้ทั่วไปเขียนไม่ได้
+# agent.json ไม่มีรหัสผ่าน, hash อยู่ใน private\credentials.json ที่ Users อ่านไม่ได้
+$configDir = Join-Path $env:ProgramData 'RainDrop'
+& (Join-Path $dest 'RainDrop.Agent.exe') --init-config "$configDir" "$Password" $Port "$Hub" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "ตั้งรหัสผ่านไม่สำเร็จ (exit $LASTEXITCODE) ตรวจว่ารหัสผ่านยาว >= 8 และไม่มีอักขระควบคุม" }
+
+# ย้ำ ACL ด้วย SID มาตรฐาน (ไม่ขึ้นกับภาษา Windows): SYSTEM/Admins เต็มสิทธิ์, Users อ่านได้อย่างเดียว
+& icacls.exe "$configDir" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
+& icacls.exe "$configDir\private" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Null
 
 # อนุญาตไมโครโฟน (สำหรับข้อความเสียง)
 $mic = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone'
@@ -51,4 +65,4 @@ New-NetFirewallRule -DisplayName 'Rain Drop Agent' -Direction Inbound -Protocol 
 
 Write-Host "ติดตั้งเสร็จแล้วที่ $dest" -ForegroundColor Green
 Write-Host "Service '$svc' กำลังทำงาน และจะเปิด Agent ให้ทุกครั้งที่บูตเครื่อง" -ForegroundColor Green
-Write-Host "รหัสออกจากโปรแกรม: $Password" -ForegroundColor Yellow
+Write-Host "ตั้งรหัสผ่านผู้ดูแลแล้ว (ไม่แสดงรหัสเพื่อความปลอดภัย) รหัสถูกเก็บเป็น hash ใน $configDir\private" -ForegroundColor Yellow

@@ -9,9 +9,10 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        // ใช้ตอน build ตัวติดตั้ง: RainDrop.Master.exe --generate-keys <โฟลเดอร์>
-        if (args.Length == 2 && args[0] == "--generate-keys")
-            return MasterKey.GenerateKeyPair(args[1]);
+        // ส่งออกเฉพาะกุญแจสาธารณะให้ผู้ติดตั้งเครื่องลูก: --export-public-key <โฟลเดอร์>
+        // (เลิก --generate-keys เพราะไม่ควรสร้าง/แจกกุญแจลับตอน build อีกต่อไป)
+        if (args.Length == 2 && args[0] == "--export-public-key")
+            return MasterKey.ExportPublicKey(args[1]);
 
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.EnableVisualStyles();
@@ -96,36 +97,52 @@ internal sealed class MasterSettings
 }
 
 /// <summary>
-/// คู่กุญแจของ Master
-/// master-private.pem = กุญแจลับ เก็บไว้ที่เครื่อง Master เท่านั้น
-/// master-public.pem  = กุญแจสาธารณะ ใส่ไว้ในตัวติดตั้งของเครื่องลูก (agent-public.pem)
+/// คู่กุญแจของ Master สร้างและเก็บ "บนเครื่อง Master เท่านั้น"
+///   %AppData%\RainDrop\master-private.dpapi = กุญแจลับ เข้ารหัสด้วย DPAPI (CurrentUser)
+///   %AppData%\RainDrop\master-public.pem   = กุญแจสาธารณะ สำหรับส่งให้ผู้ติดตั้งเครื่องลูก
 ///
-/// ลำดับการหากุญแจ:
-///   1) โฟลเดอร์ที่ติดตั้งโปรแกรม (ตัวติดตั้งวางไว้ให้ ตรงกับกุญแจใน RainDrop-Agent-Setup.exe)
-///   2) %AppData%\RainDrop\master-private.pem
-///   3) ถ้าไม่พบทั้งสองที่ จะสร้างใหม่ใน %AppData%\RainDrop
+/// ไม่อ่านกุญแจจากโฟลเดอร์ที่ติดตั้งโปรแกรมอีกต่อไป (เดิมตัวติดตั้งฝัง private key มาให้
+/// ซึ่งทำให้ทุกคนที่ได้ตัวติดตั้ง Master ปลอมเป็น Master ได้)
+/// ถ้าพบไฟล์ PEM เดิมในโปรไฟล์ผู้ใช้ จะอ่านครั้งเดียว เข้ารหัส แล้วลบไฟล์ plaintext ทิ้ง
 /// </summary>
-internal sealed class MasterKey
+internal sealed class MasterKey : IDisposable
 {
     private readonly ECDsa _key;
 
-    /// <summary>ไฟล์กุญแจสาธารณะที่ใช้ติดตั้งเครื่องลูกเองแบบไม่ใช้ตัวติดตั้ง</summary>
+    /// <summary>ไฟล์กุญแจสาธารณะที่ใช้ติดตั้งเครื่องลูก (ส่งให้ผู้ติดตั้งทางช่องทางที่เชื่อถือได้)</summary>
     public static string PublicPath => Path.Combine(DataFolder.Path, "master-public.pem");
+
+    public static string PrivateBlobPath => Path.Combine(DataFolder.Path, "master-private.dpapi");
+
+    /// <summary>พบกุญแจลับเก่าที่ตัวติดตั้งรุ่นก่อนวางไว้ในโฟลเดอร์โปรแกรมหรือไม่ (ต้องแจ้งผู้ดูแลให้หมุนกุญแจ)</summary>
+    public static bool LegacyKeyInInstallFolder { get; private set; }
 
     private MasterKey(ECDsa key) => _key = key;
 
     public static MasterKey LoadOrCreate()
     {
-        string userKey = Path.Combine(DataFolder.Path, "master-private.pem");
-        string installedKey = Path.Combine(AppContext.BaseDirectory, "master-private.pem");
+        string legacyPem = Path.Combine(DataFolder.Path, "master-private.pem");
+        LegacyKeyInInstallFolder = File.Exists(Path.Combine(AppContext.BaseDirectory, "master-private.pem"));
+        if (LegacyKeyInInstallFolder)
+            Diag.Error("MasterKey",
+                "พบ master-private.pem ในโฟลเดอร์โปรแกรม ซึ่งเป็นกุญแจที่ตัวติดตั้งรุ่นเก่าแจกไว้ " +
+                "ถือว่าหลุดแล้ว ควรสร้างกุญแจใหม่และติดตั้งเครื่องลูกใหม่ทั้งหมด");
 
         var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        if (File.Exists(installedKey))
-            key.ImportFromPem(File.ReadAllText(installedKey));
-        else if (File.Exists(userKey))
-            key.ImportFromPem(File.ReadAllText(userKey));
+
+        if (File.Exists(PrivateBlobPath))
+        {
+            key.ImportPkcs8PrivateKey(KeyVault.LoadEncrypted(PrivateBlobPath), out _);
+        }
+        else if (KeyVault.MigrateFromPem(legacyPem, PrivateBlobPath))
+        {
+            // ไฟล์ PEM ถูกลบไปแล้ว อ่านจาก blob ที่เพิ่งเข้ารหัสแทน
+            key.ImportPkcs8PrivateKey(KeyVault.LoadEncrypted(PrivateBlobPath), out _);
+        }
         else
-            File.WriteAllText(userKey, key.ExportECPrivateKeyPem());
+        {
+            KeyVault.SaveEncrypted(PrivateBlobPath, key.ExportPkcs8PrivateKey());
+        }
 
         File.WriteAllText(PublicPath, key.ExportSubjectPublicKeyInfoPem());
         return new MasterKey(key);
@@ -133,23 +150,24 @@ internal sealed class MasterKey
 
     public string Fingerprint => Protocol.Fingerprint(_key);
 
-    /// <summary>สร้างคู่กุญแจใหม่ลงโฟลเดอร์ที่กำหนด (ถ้ามีอยู่แล้วจะไม่เขียนทับ) คืนค่า 0 เมื่อสำเร็จ</summary>
-    public static int GenerateKeyPair(string folder)
+    /// <summary>
+    /// ส่งออก "เฉพาะกุญแจสาธารณะ" ไปยังโฟลเดอร์ที่กำหนด เพื่อให้ผู้ติดตั้งนำไปใช้กับตัวติดตั้งเครื่องลูก
+    /// ไม่มีการส่งออกกุญแจลับออกจากเครื่อง Master อีกต่อไป
+    /// </summary>
+    public static int ExportPublicKey(string folder)
     {
         try
         {
             Directory.CreateDirectory(folder);
-            string privatePath = Path.Combine(folder, "master-private.pem");
-            string publicPath = Path.Combine(folder, "master-public.pem");
-            if (File.Exists(privatePath)) return 0; // ห้ามเขียนทับ: เครื่องลูกที่ติดตั้งไปแล้วจะเชื่อมต่อไม่ได้
-
-            using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            File.WriteAllText(privatePath, key.ExportECPrivateKeyPem());
-            File.WriteAllText(publicPath, key.ExportSubjectPublicKeyInfoPem());
+            using var loaded = LoadOrCreate();
+            File.WriteAllText(Path.Combine(folder, "master-public.pem"), File.ReadAllText(PublicPath));
+            Console.WriteLine("ส่งออกกุญแจสาธารณะแล้ว: " + Path.Combine(folder, "master-public.pem"));
+            Console.WriteLine("ลายนิ้วมือ: " + loaded.Fingerprint);
             return 0;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine("ส่งออกกุญแจสาธารณะไม่สำเร็จ: " + ex.Message);
             return 1;
         }
     }
@@ -158,4 +176,6 @@ internal sealed class MasterKey
     {
         lock (_key) return Protocol.Sign(_key, nonce);
     }
+
+    public void Dispose() => _key.Dispose();
 }

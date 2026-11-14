@@ -769,9 +769,9 @@ internal sealed class MainForm : Form
             $"ลายนิ้วมือกุญแจของ Master:  {_key.Fingerprint}\n" +
             "(ต้องตรงกับที่เครื่องลูกแสดง: คลิกขวาไอคอนโล่ → สถานะการเชื่อมต่อ)\n\n" +
             "กุญแจสาธารณะของ Master อยู่ที่:\n" + MasterKey.PublicPath +
-            "\n\nถ้าติดตั้งเครื่องลูกด้วย RainDrop-Agent-Setup.exe ที่ build มาพร้อมกัน ไม่ต้องทำอะไรเพิ่ม" +
-            "\nถ้าติดตั้งเอง ให้คัดลอกไฟล์นี้ไปวางข้าง RainDrop.Agent.exe แล้วเปลี่ยนชื่อเป็น agent-public.pem" +
-            "\n\nห้ามคัดลอก master-private.pem ออกไปที่อื่น\n\nเปิดโฟลเดอร์เลยไหม?",
+            "\n\nตอนติดตั้งเครื่องลูกด้วย RainDrop-Agent-Setup.exe ให้เลือกไฟล์นี้ในหน้า \"กุญแจสาธารณะของ Master\"" +
+            "\n(หรือส่ง /PUBLICKEY= ในโหมดเงียบ) ถ้าติดตั้งเอง ให้คัดลอกไฟล์นี้ไปวางข้าง RainDrop.Agent.exe แล้วเปลี่ยนชื่อเป็น agent-public.pem" +
+            "\n\nกุญแจลับถูกเข้ารหัสด้วย DPAPI เก็บที่ master-private.dpapi (คัดลอกไปเครื่องอื่นก็ถอดไม่ได้) ห้ามลบหรือย้าย\n\nเปิดโฟลเดอร์เลยไหม?",
             "กุญแจยืนยันตัวตน", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
         if (answer == DialogResult.Yes)
             Process.Start("explorer.exe", $"/select,\"{MasterKey.PublicPath}\"");

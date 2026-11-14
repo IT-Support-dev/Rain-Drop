@@ -2,8 +2,8 @@
 ;  Rain Drop Master - ตัวติดตั้งสำหรับเครื่องผู้ดูแล
 ;  สร้างด้วย build-installer.bat (ต้องติดตั้ง Inno Setup 6.3 ขึ้นไป)
 ;
-;  คำเตือน: ตัวติดตั้งนี้มี "กุญแจลับ" ของ Master อยู่ข้างใน
-;  ห้ามแชร์ไฟล์นี้ให้คนทั่วไป ใครได้ไปจะควบคุมเครื่องลูกทุกเครื่องได้
+;  ตัวติดตั้งนี้ไม่มีกุญแจลับอยู่ข้างในแล้ว (เฟส C1)
+;  กุญแจลับถูกสร้างบนเครื่อง Master ตอนเปิดครั้งแรก และเข้ารหัสด้วย DPAPI ผูกกับบัญชี Windows นั้น
 ; ============================================================
 
 #define AppName    "Rain Drop Master"
@@ -37,9 +37,9 @@ Name: "desktopicon"; Description: "สร้างไอคอนบน Desktop"
 
 [Files]
 Source: "..\publish\Master\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
-; คู่กุญแจที่สร้างตอน build: เครื่องลูกที่ติดตั้งจาก RainDrop-Agent-Setup.exe ชุดเดียวกันจะเชื่อมต่อได้ทันที
-Source: "..\keys\master-private.pem"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\keys\master-public.pem"; DestDir: "{app}"; Flags: ignoreversion
+; ไม่ฝังคู่กุญแจใด ๆ ในตัวติดตั้งอีกต่อไป
+; Master จะสร้างคู่กุญแจเองตอนเปิดครั้งแรก เก็บกุญแจลับเข้ารหัสด้วย DPAPI ที่ %AppData%\RainDrop
+; แล้วส่งออกเฉพาะ master-public.pem ให้ผู้ติดตั้งเครื่องลูกผ่านปุ่ม "ตั้งค่า / กุญแจ"
 
 [Registry]
 ; อนุญาตให้ใช้ไมโครโฟน (สำหรับข้อความเสียง) ทั้งระดับเครื่องและสำหรับโปรแกรมแบบ Desktop

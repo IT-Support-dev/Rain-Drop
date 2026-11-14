@@ -6,7 +6,7 @@ namespace RainDrop.AgentService;
 
 /// <summary>
 /// บล็อกเว็บ/ลิงก์ด้วยการแก้ไฟล์ hosts ของ Windows (ต้องใช้สิทธิ์ SYSTEM ซึ่ง Service มี)
-/// อ่านรายการจาก blocklist.json ที่ Agent เขียนไว้ แล้วใส่บรรทัด "0.0.0.0 โดเมน"
+/// อ่านรายการจาก blocklist.json ที่ Service เขียนเอง (ตรวจรูปแบบแล้ว) แล้วใส่บรรทัด "0.0.0.0 โดเมน"
 /// ไว้ระหว่างเครื่องหมาย # RainDrop-BEGIN / # RainDrop-END เท่านั้น (ไม่ยุ่งกับบรรทัดอื่น)
 /// </summary>
 internal static class HostsBlocker
@@ -18,8 +18,8 @@ internal static class HostsBlocker
         Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows",
         @"System32\drivers\etc\hosts");
 
-    private static readonly string BlocklistPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RainDrop", "blocklist.json");
+    // ใช้ที่เก็บเดียวกับ Service ซึ่งตั้ง ACL ให้ผู้ใช้ทั่วไปเขียนไม่ได้
+    private static string BlocklistPath => ServiceStore.BlocklistPath;
 
     private sealed class Rules { public List<string>? Programs { get; set; } public List<string>? Urls { get; set; } }
 
@@ -63,7 +63,8 @@ internal static class HostsBlocker
                 string host = ToHost(raw);
                 if (host.Length == 0) continue;
                 domains.Add(host);
-                if (!host.StartsWith("www.")) domains.Add("www." + host);
+                if (!host.StartsWith("www.") && host.Length + 4 <= RainDrop.Shared.Hostname.MaxLength)
+                    domains.Add("www." + host);
             }
         }
         catch (Exception ex)
@@ -75,18 +76,13 @@ internal static class HostsBlocker
         return domains.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>ตัด scheme, path, พอร์ต ออกให้เหลือแต่โดเมน เช่น "https://www.facebook.com/x" -> "www.facebook.com"</summary>
-    internal static string ToHost(string raw)
-    {
-        string s = raw.Trim();
-        int scheme = s.IndexOf("://", StringComparison.Ordinal);
-        if (scheme >= 0) s = s[(scheme + 3)..];
-        int slash = s.IndexOf('/');
-        if (slash >= 0) s = s[..slash];
-        int colon = s.IndexOf(':');
-        if (colon >= 0) s = s[..colon];
-        return s.Trim().ToLowerInvariant();
-    }
+    /// <summary>
+    /// ตัด scheme, path, พอร์ต ออกให้เหลือแต่โดเมน เช่น "https://www.facebook.com/x" -> "www.facebook.com"
+    /// คืนสตริงว่างเมื่อค่าที่ได้ไม่ใช่ชื่อโฮสต์ที่ถูกต้อง (รวมกรณีมี newline/อักขระควบคุมที่หวังแทรกบรรทัดลง hosts)
+    /// ผู้เรียกต้องทิ้งค่าที่คืนว่าง ห้ามเขียนลงไฟล์
+    /// </summary>
+    internal static string ToHost(string raw) =>
+        RainDrop.Shared.Hostname.TryFromUrl(raw, out string host) ? host : "";
 
     internal static string BuildBlock(List<string> domains)
     {
@@ -95,6 +91,8 @@ internal static class HostsBlocker
         sb.AppendLine(Begin);
         foreach (var d in domains)
         {
+            // กันเหนียวอีกชั้น: แม้ผู้เรียกจะส่งค่าที่ไม่ตรวจมา ก็ห้ามเขียนชื่อโฮสต์ผิดรูปลง hosts
+            if (!RainDrop.Shared.Hostname.IsValid(d)) continue;
             sb.AppendLine($"0.0.0.0 {d}");
             sb.AppendLine($":: {d}"); // IPv6 ด้วย
         }
