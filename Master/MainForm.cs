@@ -277,19 +277,19 @@ internal sealed class MainForm : Form
         });
 
         Group("ค้นหา");
-        Tool(UiIcon.Refresh, "ค้นหา", "ค้นหาเครื่องในเครือข่าย", () => _ = DiscoverAsync(userInitiated: true), primaryLabel: true);
-        Tool(UiIcon.Plus, "เพิ่ม", "เพิ่มเครื่องเองด้วย IP", AddHost, primaryLabel: true);
+        Tool(UiIcon.Refresh, "ค้นหา", "ค้นหาเครื่องในเครือข่าย", () => _ = DiscoverAsync(userInitiated: true), showLabel: true);
+        Tool(UiIcon.Plus, "เพิ่ม", "เพิ่มเครื่องเองด้วย IP", AddHost, showLabel: true);
         Sep();
 
         Group("ควบคุม");
-        Tool(UiIcon.Monitor, "ควบคุม", "ควบคุมระยะไกลเครื่องที่เลือก", OpenRemoteForSelected, primaryLabel: true);
-        Tool(UiIcon.Chat, "แชท", "แชทกับเครื่องที่เลือก", OpenChatForSelected, primaryLabel: true);
-        Tool(UiIcon.Message, "ข้อความ", "ส่งข้อความไปยังเครื่องที่เลือก", SendMessageToTargets, primaryLabel: true);
+        Tool(UiIcon.Monitor, "ควบคุม", "ควบคุมระยะไกลเครื่องที่เลือก", OpenRemoteForSelected, showLabel: true);
+        Tool(UiIcon.Chat, "แชท", "แชทกับเครื่องที่เลือก", OpenChatForSelected, showLabel: true);
+        Tool(UiIcon.Message, "ข้อความ", "ส่งข้อความไปยังเครื่องที่เลือก", SendMessageToTargets, showLabel: true);
         Sep();
 
         Group("การล็อก");
-        Tool(UiIcon.Lock, "ล็อก", "ล็อกหน้าจอเครื่องที่เลือก", LockTargets, primaryLabel: true);
-        Tool(UiIcon.Unlock, "ปลดล็อก", "ปลดล็อกเครื่องที่เลือก", () => Broadcast(c => c.Send(MsgType.Unlock)), primaryLabel: true);
+        Tool(UiIcon.Lock, "ล็อก", "ล็อกหน้าจอเครื่องที่เลือก", LockTargets, showLabel: true);
+        Tool(UiIcon.Unlock, "ปลดล็อก", "ปลดล็อกเครื่องที่เลือก", () => Broadcast(c => c.Send(MsgType.Unlock)), showLabel: true);
         Sep();
 
         Group("พลังงาน");
@@ -334,9 +334,9 @@ internal sealed class MainForm : Form
         Sep();
 
         Group("ดูแลระบบ");
-        Tool(UiIcon.Activity, "กิจกรรม", "ดูกิจกรรมเครื่องที่เลือก", OpenActivityForSelected, primaryLabel: true);
-        Tool(UiIcon.Block, "บล็อก", "ตั้งค่าบล็อกโปรแกรม/เว็บ", OpenBlockSettings, primaryLabel: true);
-        Tool(UiIcon.More, "เพิ่มเติม", "เมนูเพิ่มเติม", ShowMoreMenu, primaryLabel: true);
+        Tool(UiIcon.Activity, "กิจกรรม", "ดูกิจกรรมเครื่องที่เลือก", OpenActivityForSelected, showLabel: true);
+        Tool(UiIcon.Block, "บล็อก", "ตั้งค่าบล็อกโปรแกรม/เว็บ", OpenBlockSettings, showLabel: true);
+        Tool(UiIcon.More, "เพิ่มเติม", "เมนูเพิ่มเติม", ShowMoreMenu, showLabel: true);
 
         // พื้นที่แสดงการ์ดเครื่อง
         _panel.Padding = new Padding(Theme.Space3);

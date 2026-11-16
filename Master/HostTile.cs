@@ -265,7 +265,7 @@ internal sealed class PreviewHostTile : UserControl, ITile
         get => _hasUnread;
         set { _hasUnread = value; UpdateBorder(); }
     }
-    public bool Visible { get => base.Visible; set => base.Visible = value; }
+    public new bool Visible { get => base.Visible; set => base.Visible = value; }
     public AgentClient? Client => null;
 
     public PreviewHostTile(HostEntry host, StatusKind kind)
