@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Drawing.Imaging;
 using System.Security.Cryptography;
 using System.Text.Json;
 using RainDrop.Shared;
@@ -37,11 +39,53 @@ internal static class Program
         return new string(chars.ToArray());
     }
 
+    /// <summary>Render หน้าต่างหลักและ dialog สำคัญเป็น PNG (Debug/env เท่านั้น)</summary>
+    private static int DumpPng(string firstArg, string secondArg, string[] args)
+    {
+        // args: --dump-png <mode> <folder>
+        // mode = "main" (หน้าต่างหลัก) หรือ "all" (หลัก + dialog สำคัญ)
+        string mode = firstArg;
+        string folder = secondArg;
+        if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+
+        bool envPreview = string.Equals(Environment.GetEnvironmentVariable("RAINDROP_UI_PREVIEW"), "1", StringComparison.OrdinalIgnoreCase);
+        if (!envPreview && !Debugger.IsAttached) return 1;
+
+        var scales = new[] { 1.0f, 1.25f, 1.5f };
+        foreach (var scale in scales)
+        {
+            using var form = new MainForm(new[] { "--ui-preview" });
+            form.Size = new Size((int)(1400 * scale), (int)(860 * scale));
+            form.Show();
+            var bmp = new Bitmap(form.Width, form.Height);
+            form.DrawToBitmap(bmp, new Rectangle(0, 0, form.Width, form.Height));
+            bmp.Save(Path.Combine(folder, $"main_{scale:0.00}.png"), ImageFormat.Png);
+            form.Close();
+        }
+
+        if (mode == "all")
+        {
+            // Dialog ตัวอย่าง (settings, confirm, alert)
+            using var dlg = new Form();
+            Theme.ConfigureForm(dlg, new Size(Theme.DialogMinWidth, Theme.DialogMinHeight));
+            dlg.Text = "ตัวอย่าง Dialog";
+            dlg.Size = new Size((int)(500 * 1.0f), (int)(300 * 1.0f));
+            foreach (var scale in scales)
+            {
+                var bmp = new Bitmap((int)(500 * scale), (int)(300 * scale));
+                dlg.DrawToBitmap(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height));
+                bmp.Save(Path.Combine(folder, $"dialog_{scale:0.00}.png"), ImageFormat.Png);
+            }
+        }
+
+        Console.WriteLine($"ส่งออก PNG แล้วที่ {folder}");
+        return 0;
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
         // ส่งออกเฉพาะกุญแจสาธารณะให้ผู้ติดตั้งเครื่องลูก: --export-public-key <โฟลเดอร์>
-        // (เลิก --generate-keys เพราะไม่ควรสร้าง/แจกกุญแจลับตอน build อีกต่อไป)
         if (args.Length == 2 && args[0] == "--export-public-key")
             return MasterKey.ExportPublicKey(args[1]);
         if (args.Length == 1 && args[0] == "--verify-audit")
@@ -64,8 +108,14 @@ internal static class Program
             catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
         }
 
+        // --dump-png <mode> <folder>: render หน้าต่างเป็น PNG (Debug/env เท่านั้น)
+        if (args.Length == 3 && args[0] == "--dump-png" &&
+            (Debugger.IsAttached || string.Equals(Environment.GetEnvironmentVariable("RAINDROP_UI_PREVIEW"), "1", StringComparison.OrdinalIgnoreCase)))
+        {
+            return DumpPng(args[1], args[2], args);
+        }
+
         // ถ้าเกิด exception ที่ไม่ได้จับในฟอร์มหรือเธรดใด ๆ ให้บันทึก log และแจ้งผู้ใช้เป็นภาษาไทย
-        // ก่อนปิดโปรแกรม ห้ามให้แอปตายเงียบโดยไม่บอกสาเหตุ
         Application.ThreadException += (_, e) =>
         {
             Diag.Error("UnhandledUI", "เกิดข้อผิดพลาดที่ไม่ได้จับในเธรดส่วนติดต่อผู้ใช้", e.Exception);
@@ -108,7 +158,7 @@ internal static class Program
     }
 }
 
-/// <summary>โฟลเดอร์เก็บข้อมูลของผู้ใช้ (%AppData%\RainDrop) เพราะเขียนลง Program Files ไม่ได้</summary>
+/// <summary>โฟลเดอร์เก็บข้อมูลของผู้ใช้ (%AppData%\\RainDrop) เพราะเขียนลง Program Files ไม่ได้</summary>
 internal static class DataFolder
 {
     private static string? _overridePath;
@@ -178,7 +228,6 @@ internal sealed class MasterSettings
         }
         catch (Exception ex)
         {
-            // ตั้งค่าหาย = รายชื่อเครื่อง/รายการบล็อกที่ผู้ดูแลเคยตั้งไว้จะไม่ถูกโหลด ต้องตรวจสอบได้
             Diag.Warn("MasterSettings.Load", "อ่านค่าตั้งของ Master ไม่สำเร็จ จึงใช้ค่าเริ่มต้น", ex);
         }
         return new MasterSettings();
@@ -190,8 +239,8 @@ internal sealed class MasterSettings
 
 /// <summary>
 /// คู่กุญแจของ Master สร้างและเก็บ "บนเครื่อง Master เท่านั้น"
-///   %AppData%\RainDrop\master-private.dpapi = กุญแจลับ เข้ารหัสด้วย DPAPI (CurrentUser)
-///   %AppData%\RainDrop\master-public.pem   = กุญแจสาธารณะ สำหรับส่งให้ผู้ติดตั้งเครื่องลูก
+///   %AppData%\\RainDrop\\master-private.dpapi = กุญแจลับ เข้ารหัสด้วย DPAPI (CurrentUser)
+///   %AppData%\\RainDrop\\master-public.pem   = กุญแจสาธารณะ สำหรับส่งให้ผู้ติดตั้งเครื่องลูก
 ///
 /// ไม่อ่านกุญแจจากโฟลเดอร์ที่ติดตั้งโปรแกรมอีกต่อไป (เดิมตัวติดตั้งฝัง private key มาให้
 /// ซึ่งทำให้ทุกคนที่ได้ตัวติดตั้ง Master ปลอมเป็น Master ได้)
@@ -231,7 +280,6 @@ internal sealed class MasterKey : IDisposable
         }
         else if (KeyVault.MigrateFromPem(legacyPem, PrivateBlobPath))
         {
-            // ไฟล์ PEM ถูกลบไปแล้ว อ่านจาก blob ที่เพิ่งเข้ารหัสแทน
             key.ImportPkcs8PrivateKey(KeyVault.LoadEncrypted(PrivateBlobPath), out _);
         }
         else

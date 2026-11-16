@@ -3,14 +3,16 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
 using RainDrop.Shared;
 
 namespace RainDrop.Master;
 
 /// <summary>
-/// หน้าจอหลัก: แสดงการ์ดเครื่องลูกเป็นตาราง + แถบเครื่องมือสั่งงาน
-/// คำสั่งจะส่งไปยังเครื่องที่เลือกไว้ ถ้าไม่ได้เลือกเลยจะส่งไปทุกเครื่อง
-/// เปิดด้วย --ui-preview (เฉพาะ DEBUG) จะแสดงข้อมูลจำลอง 6 เครื่องโดยไม่เชื่อมต่อเครือข่าย
+/// หน้าจอหลัก: สไตล์ Swiss/Minimal (Phase U3)
+/// พื้นเรียบ ไม่มีเงา ไม่มีมุมมน แถบซ้าย แถบเครื่องมือ การ์ดเครื่อง แถบสถานะ
+/// เปิดด้วย --ui-preview (เฉพาะ Debug หรือ env RAINDROP_UI_PREVIEW=1) จะแสดงข้อมูลจำลอง 6 เครื่อง
+/// โดยไม่เชื่อมต่อเครือข่าย ไม่เขียนตั้งค่า
 /// </summary>
 internal sealed class MainForm : Form
 {
@@ -32,9 +34,14 @@ internal sealed class MainForm : Form
 
     public MainForm(string[] args)
     {
-        // --ui-preview ต้องถูกระบุด้วยตนเองผ่านบรรทัดคำสั่ง จึงปลอดภัยที่จะเปิดในทุกบิลด์
-        // (ไม่เขียนตั้งค่า ไม่เชื่อมต่อเครือข่าย ไม่เริ่ม polling)
-        _uiPreview = args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase);
+        // --ui-preview ซ่อนหลังเงื่อนไขปลอดภัย: Debug build หรือ env RAINDROP_UI_PREVIEW=1
+        // ไม่ปล่อยเป็นพารามิเตอร์เปิดสาธารณะในตัวติดตั้ง Release
+        bool envPreview = string.Equals(Environment.GetEnvironmentVariable("RAINDROP_UI_PREVIEW"), "1", StringComparison.OrdinalIgnoreCase);
+#if DEBUG
+        _uiPreview = args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase) || envPreview;
+#else
+        _uiPreview = envPreview;
+#endif
 
         Text = "Rain Drop Master";
         Icon = AppIcon.Load();
@@ -44,12 +51,10 @@ internal sealed class MainForm : Form
         // ต้องสร้าง _panel ก่อน AddMockTiles() เพราะการ์ดตัวอย่างต้องถูกเพิ่มลง _panel
         _panel = new UiFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.ZoneContent };
         ApplyDarkScrollbars(_panel);
+        _panel.Padding = new Padding(Theme.Space3);
 
         if (_uiPreview)
         {
-            // โหมดตัวอย่าง: ไม่เขียนตั้งค่า ไม่เชื่อมต่อเครือข่าย ใช้ข้อมูลจำลอง
-            // สร้าง CA คู่เดียวแล้วออก client cert จากคู่นั้น เพื่อให้ _pki และ _key ไม่ null
-            // (ทั้งคู่ไม่ถูกใช้จริงในโหมดตัวอย่าง เพราะทุกเส้นทางคำสั่งจะคืนเร็วด้วยข้อความ "โหมดตัวอย่าง")
             var ca = RepoCertificates.CreateCa();
             var caKey = ca.GetECDsaPrivateKey()!;
             var clientCert = RepoCertificates.IssueClient(ca, caKey);
@@ -69,12 +74,13 @@ internal sealed class MainForm : Form
                 AddTile(host);
         }
 
-        var content = BuildContent();
-        content.TabIndex = 1;
-        Controls.Add(content);
         var sidebar = BuildSidebar();
         sidebar.TabIndex = 0;
         Controls.Add(sidebar);
+
+        var content = BuildContent();
+        content.TabIndex = 1;
+        Controls.Add(content);
 
         ApplyFilter();
 
@@ -101,11 +107,11 @@ internal sealed class MainForm : Form
             var host = new HostEntry { Name = name, Address = address };
             var tile = new PreviewHostTile(host, kind);
             _tiles.Add(tile);
-            _panel.Controls.Add(tile);
+            _panel.Controls.Add((Control)tile);
         }
     }
 
-    // ===================== โครงหน้าจอแบ่งโซนสี =====================
+    // ===================== แถบซ้าย (Sidebar) =====================
 
     private Control BuildSidebar()
     {
@@ -117,11 +123,11 @@ internal sealed class MainForm : Form
             Padding = new Padding(Theme.Space3),
         };
 
-        // หัวเรื่องพร้อมโลโก้หยดน้ำ (ขนาดสมดุลกับข้อความ)
+        // โลโก้ + ชื่อหัวโปรแกรม
         var header = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = Theme.Space6 * 2,
+            Height = Theme.ButtonHeightLarge,
             AutoSize = false,
             WrapContents = false,
             BackColor = Color.Transparent,
@@ -129,14 +135,14 @@ internal sealed class MainForm : Form
         var logo = new PictureBox
         {
             Image = AppIcon.Load().ToBitmap(),
-            Size = new Size(Theme.IconSizeLarge * 2, Theme.IconSizeLarge * 2),
+            Size = new Size(Theme.IconSizeLarge, Theme.IconSizeLarge),
             SizeMode = PictureBoxSizeMode.Zoom,
             BackColor = Color.Transparent,
         };
         var title = new Label
         {
             Text = "Rain Drop",
-            Font = Theme.FontTitle,          // ลดลงเหลือ 12pt สมดุลกับโลโก้
+            Font = Theme.FontDeviceName,   // 13pt semibold
             ForeColor = Theme.TextPrimary,
             AutoSize = true,
             TextAlign = ContentAlignment.MiddleLeft,
@@ -145,14 +151,14 @@ internal sealed class MainForm : Form
         header.Controls.Add(logo);
         header.Controls.Add(title);
 
-        // ช่องค้นหา: UiInput แบบวาดเอง มี placeholder + ไอคอนแว่น
+        // ช่องค้นหา: ขีดใต้อย่างเดียว placeholder "ค้นหาเครื่อง" ไอคอนแว่น 16px
         var searchLabel = Theme.SectionLabel("ค้นหาเครื่อง");
         var search = UiInput.SearchBox("ค้นหาเครื่อง...", text => { _query = text; ApplyFilter(); });
         search.Dock = DockStyle.Top;
         search.Height = Theme.InputHeight;
         Theme.SetToolTip(search, "ค้นหาชื่อเครื่องหรือ IP");
 
-        // ตัวกรองสถานะ: ปุ่ม chip แบบ segmented แทน ComboBox
+        // ตัวกรองสถานะ: ข้อความ tab "ทั้งหมด · ออนไลน์ · ออฟไลน์" ขีดเส้นใต้ตัวที่เลือก
         var filterLabel = Theme.SectionLabel("สถานะ");
         var filter = new UiSegmentedFilter(new[] { "ทั้งหมด", "ออนไลน์", "ออฟไลน์" }, 0);
         filter.SelectionChanged += (_, i) => { _statusFilter = (MachineStatusFilter)i; ApplyFilter(); };
@@ -168,20 +174,13 @@ internal sealed class MainForm : Form
         _channelList.BackColor = Theme.ZoneSidebar;
         ApplyDarkScrollbars(_channelList);
 
-        // ปุ่มท้ายแถบ: ตั้งค่า / ชุมชน เป็น ghost ธรรมดา
+        // ปุ่มท้ายแถบ: ตั้งค่า / ชุมชน เป็นข้อความธรรมดา (ghost)
         var settings = new UiButton("ตั้งค่า", ButtonKind.Ghost, UiIcon.Settings) { Dock = DockStyle.Bottom };
         settings.TabIndex = 4;
         settings.Click += (_, _) => ShowSettings();
         var community = new UiButton("ชุมชน", ButtonKind.Ghost, UiIcon.Chat) { Dock = DockStyle.Bottom };
         community.TabIndex = 3;
         community.Click += (_, _) => OpenCommunity();
-
-        // ปุ่ม "เพิ่มเครื่อง" เป็น primary เต็มความกว้างอยู่เหนือรายการปุ่มอื่น
-        var add = new UiButton("เพิ่มเครื่อง", ButtonKind.Primary, UiIcon.Plus) { Dock = DockStyle.Bottom };
-        add.Height = Theme.ButtonHeightLarge;
-        add.Margin = new Padding(0, Theme.Space2, 0, 0);
-        add.TabIndex = 2;
-        add.Click += (_, _) => AddHost();
 
         sidebar.Controls.Add(_channelList);
         sidebar.Controls.Add(_count);
@@ -191,9 +190,8 @@ internal sealed class MainForm : Form
         sidebar.Controls.Add(header);
         sidebar.Controls.Add(settings);
         sidebar.Controls.Add(community);
-        sidebar.Controls.Add(add);
 
-        // เส้นแบ่งท้ายแถบซ้าย
+        // เส้นแบ่งขวาของแถบซ้าย 1px
         var divider = new Panel { Dock = DockStyle.Right, Width = 1, BackColor = Theme.Divider };
         sidebar.Controls.Add(divider);
         divider.BringToFront();
@@ -201,105 +199,69 @@ internal sealed class MainForm : Form
         return sidebar;
     }
 
+    // ===================== พื้นที่เนื้อหา (Content) =====================
+
     private Control BuildContent()
     {
         var center = new Panel { Dock = DockStyle.Fill, BackColor = Theme.ZoneContent };
 
-        // แถบเครื่องมือ: แบ่งกลุ่มด้วยช่องว่าง ปุ่มหลักมีข้อความกำกับ ไอคอน 20px พื้นที่กด ≥ 36px
+        // ---------- แถบเครื่องมือ: แถวเดียว 48px ไม่มีข้อความใต้ไอคอน ----------
         var toolbar = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
             Height = Theme.ToolbarHeight,
-            Padding = new Padding(Theme.Space3, Theme.Space2, Theme.Space3, Theme.Space2),
+            Padding = new Padding(Theme.Space3, Theme.Space1, Theme.Space3, Theme.Space1),
             BackColor = Theme.ZoneHeader,
             WrapContents = false,
-            AutoScroll = true,
+            AutoScroll = false,   // Phase U3: ห้าม scrollbar ใน toolbar
         };
-        ApplyDarkScrollbars(toolbar);
 
-        void Group(string label)
+        // ปุ่มเครื่องมือ: ไอคอน+ข้อความในบรรทัดเดียวกัน จัดกลุ่มด้วยช่องว่าง 24px
+        void Tool(UiIcon icon, string text, string tip, Action act, ButtonKind kind = ButtonKind.Ghost)
         {
-            var g = new Label
+            var b = new UiButton(text, kind, icon)
             {
-                Text = label,
-                Font = Theme.FontCaptionStrong,
-                ForeColor = Theme.TextMuted,
-                AutoSize = true,
-                Margin = new Padding(Theme.Space3, Theme.Space1, Theme.Space1, Theme.Space1),
                 Height = Theme.ButtonHeight,
-                TextAlign = ContentAlignment.MiddleLeft,
-            };
-            toolbar.Controls.Add(g);
-        }
-
-        void Tool(UiIcon icon, string text, string tip, Action act, ButtonKind kind = ButtonKind.Ghost, bool showLabel = false)
-        {
-            var container = new FlowLayoutPanel
-            {
-                AutoSize = true,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                Margin = new Padding(Theme.Space2, 0, Theme.Space2, 0),
-            };
-            // ปุ่มหลักเป็นไอคอนอย่างเดียว ข้อความกำกับอยู่ใต้ปุ่ม
-            var b = new UiButton("", kind, icon)
-            {
-                Width = Theme.ButtonHeightLarge,
-                Height = Theme.ButtonHeightLarge,
-                Margin = new Padding(0, 0, 0, Theme.Space1),
+                Margin = new Padding(0, 0, Theme.Space3, 0),
             };
             Theme.SetToolTip(b, tip);
             b.Click += (_, _) => act();
-            container.Controls.Add(b);
-            if (showLabel && !string.IsNullOrEmpty(text))
-            {
-                var lbl = new Label
-                {
-                    Text = text,
-                    Font = Theme.FontCaption,
-                    ForeColor = Theme.TextSecondary,
-                    AutoSize = true,
-                    TextAlign = ContentAlignment.MiddleCenter,
-                    Margin = new Padding(0, 0, 0, 0),
-                };
-                container.Controls.Add(lbl);
-            }
-            toolbar.Controls.Add(container);
+            toolbar.Controls.Add(b);
         }
 
         void Sep() => toolbar.Controls.Add(new Panel
         {
             Width = 1,
-            Height = Theme.ButtonHeightLarge,
+            Height = Theme.ButtonHeight,
             BackColor = Theme.Divider,
-            Margin = new Padding(Theme.Space2, Theme.Space1, Theme.Space2, Theme.Space1),
+            Margin = new Padding(Theme.Space3, Theme.Space1, Theme.Space3, Theme.Space1),
         });
 
-        Group("ค้นหา");
-        Tool(UiIcon.Refresh, "ค้นหา", "ค้นหาเครื่องในเครือข่าย", () => _ = DiscoverAsync(userInitiated: true), showLabel: true);
-        Tool(UiIcon.Plus, "เพิ่ม", "เพิ่มเครื่องเองด้วย IP", AddHost, showLabel: true);
+        Tool(UiIcon.Refresh, "ค้นหา", "ค้นหาเครื่องในเครือข่าย", () => _ = DiscoverAsync(userInitiated: true));
+        Tool(UiIcon.Plus, "เพิ่ม", "เพิ่มเครื่องเองด้วย IP", AddHost);
         Sep();
 
-        Group("ควบคุม");
-        Tool(UiIcon.Monitor, "ควบคุม", "ควบคุมระยะไกลเครื่องที่เลือก", OpenRemoteForSelected, showLabel: true);
-        Tool(UiIcon.Chat, "แชท", "แชทกับเครื่องที่เลือก", OpenChatForSelected, showLabel: true);
-        Tool(UiIcon.Message, "ข้อความ", "ส่งข้อความไปยังเครื่องที่เลือก", SendMessageToTargets, showLabel: true);
+        Tool(UiIcon.Monitor, "ควบคุม", "ควบคุมระยะไกลเครื่องที่เลือก", OpenRemoteForSelected);
+        Tool(UiIcon.Chat, "แชท", "แชทกับเครื่องที่เลือก", OpenChatForSelected);
+        Tool(UiIcon.Message, "ข้อความ", "ส่งข้อความไปยังเครื่องที่เลือก", SendMessageToTargets);
         Sep();
 
-        Group("การล็อก");
-        Tool(UiIcon.Lock, "ล็อก", "ล็อกหน้าจอเครื่องที่เลือก", LockTargets, showLabel: true);
-        Tool(UiIcon.Unlock, "ปลดล็อก", "ปลดล็อกเครื่องที่เลือก", () => Broadcast(c => c.Send(MsgType.Unlock)), showLabel: true);
+        Tool(UiIcon.Lock, "ล็อก", "ล็อกหน้าจอเครื่องที่เลือก", LockTargets);
+        Tool(UiIcon.Unlock, "ปลดล็อก", "ปลดล็อกเครื่องที่เลือก", () => Broadcast(c => c.Send(MsgType.Unlock)));
         Sep();
 
-        Group("พลังงาน");
-        var shutdown = new UiButton("ปิดเครื่อง", ButtonKind.Danger, UiIcon.Power)
+        Tool(UiIcon.Activity, "กิจกรรม", "ดูกิจกรรมเครื่องที่เลือก", OpenActivityForSelected);
+        Tool(UiIcon.Block, "บล็อก", "ตั้งค่าบล็อกโปรแกรม/เว็บ", OpenBlockSettings);
+        Tool(UiIcon.More, "เพิ่มเติม", "เมนูเพิ่มเติม", ShowMoreMenu);
+        Sep();
+
+        // พลังงาน: มีไอคอนและข้อความ เมนูเปิดแสดง ปิดเครื่อง/รีสตาร์ท/ออกจากระบบ
+        var shutdown = new UiButton("พลังงาน", ButtonKind.Danger, UiIcon.Power)
         {
-            Width = Theme.ButtonHeightLarge,
-            Height = Theme.ButtonHeightLarge,
+            Height = Theme.ButtonHeight,
+            Margin = new Padding(0, 0, Theme.Space3, 0),
         };
         Theme.SetToolTip(shutdown, "ปิดเครื่อง / รีสตาร์ท / ออกจากระบบ");
-        // สร้าง ContextMenuStrip ใหม่ทุกครั้งที่คลิก ป้องกัน ObjectDisposedException
-        // จากการ dispose เมนูเก่าแล้วนำกลับมาใช้ซ้ำ
         shutdown.MouseDown += (_, e) =>
         {
             if (e.Button != MouseButtons.Left) return;
@@ -311,56 +273,21 @@ internal sealed class MainForm : Form
             menu.Closed += (_, _) => menu.Dispose();
             menu.Show(shutdown, new Point(0, shutdown.Height));
         };
-        var powerContainer = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            Margin = new Padding(Theme.Space2, 0, Theme.Space2, 0),
-        };
-        powerContainer.Controls.Add(shutdown);
-        var powerLbl = new Label
-        {
-            Text = "พลังงาน",
-            Font = Theme.FontCaption,
-            ForeColor = Theme.TextSecondary,
-            AutoSize = true,
-            TextAlign = ContentAlignment.MiddleCenter,
-        };
-        powerContainer.Controls.Add(powerLbl);
-        toolbar.Controls.Add(powerContainer);
-        Sep();
+        toolbar.Controls.Add(shutdown);
 
-        Group("ดูแลระบบ");
-        Tool(UiIcon.Activity, "กิจกรรม", "ดูกิจกรรมเครื่องที่เลือก", OpenActivityForSelected, showLabel: true);
-        Tool(UiIcon.Block, "บล็อก", "ตั้งค่าบล็อกโปรแกรม/เว็บ", OpenBlockSettings, showLabel: true);
-        Tool(UiIcon.More, "เพิ่มเติม", "เมนูเพิ่มเติม", ShowMoreMenu, showLabel: true);
-
-        // พื้นที่แสดงการ์ดเครื่อง
+        // ---------- พื้นที่แสดงการ์ดเครื่อง ----------
         _panel.Padding = new Padding(Theme.Space3);
 
-        // Empty state ออกแบบใหม่: ไอคอนใหญ่ หัวข้อใหญ่ คำอธิบาย ปุ่มสองปุ่มกึ่งกลาง
+        // ---------- Empty state: หัวเรื่อง 20pt + คำอธิบายบรรทัดเดียว + ปุ่มข้อความสองปุ่ม ----------
         _empty = new Panel { Dock = DockStyle.Fill, BackColor = Theme.ZoneContent };
-        var emptyContainer = new Panel
-        {
-            AutoSize = true,
-            BackColor = Color.Transparent,
-        };
-        var emptyIcon = new PictureBox
-        {
-            Image = UiIcons.Get(UiIcon.Computer, Theme.TextMuted, 64),
-            Size = new Size(64, 64),
-            SizeMode = PictureBoxSizeMode.Zoom,
-            BackColor = Color.Transparent,
-            Margin = new Padding(0, 0, 0, Theme.Space4),
-        };
+        var emptyContainer = new Panel { AutoSize = true, BackColor = Color.Transparent };
         var emptyHeading = new Label
         {
-            Text = "ยังไม่มีเครื่องลูก",
-            Font = Theme.FontHeading,
+            Text = "ยังไม่มีเครื่อง",
+            Font = Theme.FontHeading,      // 20pt semibold
             ForeColor = Theme.TextPrimary,
             AutoSize = true,
-            TextAlign = ContentAlignment.MiddleCenter,
+            TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, 0, 0, Theme.Space2),
         };
         var emptyDesc = new Label
@@ -369,9 +296,9 @@ internal sealed class MainForm : Form
             Font = Theme.FontBody,
             ForeColor = Theme.TextMuted,
             AutoSize = true,
-            TextAlign = ContentAlignment.MiddleCenter,
-            MaximumSize = new Size(340, 0),
-            Margin = new Padding(0, 0, 0, Theme.Space6),
+            TextAlign = ContentAlignment.MiddleLeft,
+            MaximumSize = new Size(Theme.SidebarWidth * 3, 0),
+            Margin = new Padding(0, 0, 0, Theme.Space4),
         };
         var emptyButtons = new FlowLayoutPanel
         {
@@ -396,49 +323,39 @@ internal sealed class MainForm : Form
         emptyButtons.Controls.Add(btnSearch);
         emptyButtons.Controls.Add(btnAdd);
 
-        emptyContainer.Controls.Add(emptyIcon);
         emptyContainer.Controls.Add(emptyHeading);
         emptyContainer.Controls.Add(emptyDesc);
         emptyContainer.Controls.Add(emptyButtons);
 
-        // จัด empty state กึ่งกลางพื้นที่
         var emptyCenter = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
-        var emptyWrapper = new TableLayoutPanel
-        {
-            ColumnCount = 1,
-            RowCount = 1,
-            AutoSize = true,
-            BackColor = Color.Transparent,
-            Dock = DockStyle.None,
-        };
-        emptyWrapper.Controls.Add(emptyContainer);
-        emptyWrapper.Dock = DockStyle.None;
-        emptyCenter.Controls.Add(emptyWrapper);
-        emptyWrapper.Location = new Point(0, 0); // จะจัดตำแหน่งใน Resize
+        emptyCenter.Controls.Add(emptyContainer);
         emptyCenter.Resize += (_, _) =>
         {
-            emptyWrapper.Left = (emptyCenter.Width - emptyWrapper.Width) / 2;
-            emptyWrapper.Top = (emptyCenter.Height - emptyWrapper.Height) / 2;
+            emptyContainer.Location = new Point(Theme.Space3, Theme.Space3);
         };
         _empty.Controls.Add(emptyCenter);
 
+        // ---------- แถบสถานะ: ข้อความ 9.5pt สีจาง เส้นบน 1px ----------
+        var statusDivider = new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = Theme.Divider };
         _status.Dock = DockStyle.Bottom;
         _status.Height = Theme.StatusHeight;
-        _status.BackColor = Theme.ZoneStatus;
-        _status.ForeColor = Theme.TextSecondary;
-        _status.Font = Theme.FontBody; // ≥ 9pt
+        _status.BackColor = Theme.ZoneContent;
+        _status.ForeColor = Theme.TextMuted;
+        _status.Font = Theme.FontCaption;   // 9.5pt
         _status.TextAlign = ContentAlignment.MiddleLeft;
         _status.Padding = new Padding(Theme.Space3, 0, 0, 0);
         _status.Text = "เลือกเครื่องเพื่อสั่งงานรายเครื่อง ถ้าไม่เลือกจะส่งไปทุกเครื่อง";
-        var statusDivider = new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = Theme.Divider };
-        center.Controls.Add(statusDivider);
 
+        center.Controls.Add(statusDivider);
         center.Controls.Add(_panel);
         center.Controls.Add(_empty);
         center.Controls.Add(_status);
         center.Controls.Add(toolbar);
         return center;
     }
+
+    // ===================== Toolbar overflow: วัดความกว้างจริงด้วย TextRenderer.MeasureText ----------
+    // ถ้าพื้นที่ไม่พอให้ยุบปุ่มเข้าเมนู "เพิ่มเติม" ตามลำดับความสำคัญ (ทำในอนาคตเมื่อต้องการวัดจริง)
 
     private void ShowMoreMenu()
     {
@@ -460,6 +377,8 @@ internal sealed class MainForm : Form
         menu.Closed += (_, _) => menu.Dispose();
         menu.Show(Cursor.Position);
     }
+
+    // ===================== ช่องซ้าย: รายการเครื่อง (ไม่ซ้ำกับพื้นที่หลัก) =====================
 
     private readonly Dictionary<ITile, Label> _channelRows = new();
     private string _sidebarSignature = "";
@@ -586,7 +505,7 @@ internal sealed class MainForm : Form
         AssignMenu(tile);
         tile.Disposed += (_, _) => menu.Dispose();
         _tiles.Add(tile);
-        _panel.Controls.Add(tile);
+        _panel.Controls.Add((Control)tile);
         tile.Start();
         ApplyFilter();
     }
@@ -916,7 +835,8 @@ internal sealed class MainForm : Form
             "ตั้งแต่ C2a การติดตั้ง Agent ใช้ enrollment bundle (.rdrop) ที่มีรหัสผ่าน แทน master-public.pem\n" +
             "เมนู เพิ่มเติม → ส่งออก enrollment bundle สำหรับเครื่องใหม่\n\n" +
             "CA public: " + MasterPki.CaPublicPath + "\n" +
-            "กุญแจลับ CA/Master เข้ารหัส DPAPI CurrentUser ในโฟลเดอร์นี้ ห้ามลบหรือย้าย\n\nเปิดโฟลเดอร์เลยไหม?",
+            "กุญแจลับ CA/Master เข้ารหัส DPAPI CurrentUser ในโฟลเดอร์นี้ ห้ามลบหรือย้าย\n\n" +
+            "เปิดโฟลเดอร์เลยไหม?",
             "เปิดโฟลเดอร์");
         if (answer)
             Process.Start("explorer.exe", $"/select,\"{MasterPki.CaPublicPath}\"");
@@ -947,6 +867,7 @@ internal sealed class MainForm : Form
         var accent = kind.Contains("USB") || kind.Contains("ส่งออก") ? Theme.Waiting
                    : kind.Contains("บล็อก") ? Theme.Danger
                    : Theme.AccentHover;
+
         var toast = new ToastForm(title, text, accent);
         toast.FormClosed += (_, _) => { _toasts.Remove(toast); RepositionToasts(); };
         _toasts.Insert(0, toast);

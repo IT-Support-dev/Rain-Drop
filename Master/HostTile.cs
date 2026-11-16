@@ -17,8 +17,13 @@ internal interface ITile : IDisposable
 }
 
 /// <summary>
-/// การ์ดเครื่องลูก 1 เครื่อง: ชื่อ สถานะ IP และภาพย่อ
-/// ตรรกะเชื่อมต่อ/ดึงภาพเหมือนเดิม; ปุ่มลัดแสดงเมื่อชี้เมาส์
+/// การ์ดเครื่องลูกสไตล์ Swiss/Minimal (Phase U3)
+/// ไม่มีกรอบ ไม่มีพื้นหลังต่างจากหน้า ใช้เส้นบนบาง 1px
+/// แถวแรก: ชื่อเครื่อง (semibold) ชิดซ้าย + จุดสถานะและข้อความสถานะชิดขวา
+/// แถวสอง: IP สีจาง ตามด้วยภาพหน้าจอ 16:9 ไม่มีขอบ
+/// ถ้าไม่มีภาพ: พื้นผิวเรียบ #1A1A1A พร้อมข้อความ "ไม่มีภาพ" สีจางตรงกลาง ไม่มีไอคอนใหญ่
+/// เลือกแล้ว: เส้นสีเน้นด้านบนหนา 2px แทนกรอบ
+/// ปุ่มลัด (ควบคุม/แชท/ล็อก) โผล่เป็นข้อความตอน hover ที่มุมล่างขวา
 /// </summary>
 internal sealed class HostTile : UserControl, ITile
 {
@@ -27,6 +32,7 @@ internal sealed class HostTile : UserControl, ITile
     private readonly Label _address;
     private readonly StatusBadge _badge;
     private readonly FlowLayoutPanel _shortcuts;
+    private readonly Panel _topLine;           // เส้นบน 1px (ปกติ) / 2px สีเน้น (เลือก)
     private readonly MasterSettings _settings;
     private readonly MasterKey _key;
     private readonly MasterPki _pki;
@@ -66,11 +72,6 @@ internal sealed class HostTile : UserControl, ITile
         set { _hasUnread = value; UpdateBorder(); }
     }
 
-    private void UpdateBorder() => BackColor =
-        _hasUnread ? Theme.Waiting :
-        _selected ? Theme.AccentHover :
-        Theme.Border;
-
     public HostTile(HostEntry host, MasterSettings settings, MasterKey key, MasterPki pki)
     {
         Host = host;
@@ -80,74 +81,109 @@ internal sealed class HostTile : UserControl, ITile
 
         Size = new Size(Theme.CardWidth, Theme.CardHeight);
         Margin = new Padding(Theme.Space2);
-        Padding = new Padding(Theme.Space1);
-        BackColor = Theme.Border;
+        Padding = Padding.Empty;
+        BackColor = Theme.ZoneContent;   // เดียวกับพื้นหน้า ไม่มีพื้นหลังต่างกัน
         DoubleBuffered = true;
 
-        var surface = new UiCard { Dock = DockStyle.Fill, Padding = new Padding(Theme.Space2) };
-        _pic = new UiPictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
-        // ยังไม่มีภาพจากเครื่องลูก ให้แสดงไอคอนเครื่องจางๆ แทนพื้นว่าง
+        // เส้นบน: ปกติ 1px สีจาง เลือกแล้ว 2px สีเน้น
+        _topLine = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 1,
+            BackColor = Theme.Border,
+        };
+
+        var surface = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.ZoneContent,
+            Padding = new Padding(Theme.Space2),
+        };
+
+        // ภาพหน้าจอ 16:9 ไม่มีขอบ (ถ้าไม่มีภาพ แสดงพื้นผิวเรียบ + ข้อความ "ไม่มีภาพ")
+        _pic = new UiPictureBox
+        {
+            Dock = DockStyle.Fill,
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Theme.Surface,
+        };
         _pic.Paint += (_, e) =>
         {
             if (_pic.Image is null)
             {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                // UiIcons เป็น cache — วาดทับได้ ไม่ต้อง Dispose
-                var icon = UiIcons.Get(UiIcon.Computer, Theme.TextDisabled, 48);
-                var rect = new Rectangle(
-                    (_pic.Width - 48) / 2,
-                    (_pic.Height - 48) / 2,
-                    48, 48);
-                e.Graphics.DrawImage(icon, rect);
+                e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                var msg = "ไม่มีภาพ";
+                var size = TextRenderer.MeasureText(msg, Theme.FontBody);
+                var x = (_pic.Width - size.Width) / 2;
+                var y = (_pic.Height - size.Height) / 2;
+                TextRenderer.DrawText(e.Graphics, msg, Theme.FontBody, new Point(x, y), Theme.TextMuted);
             }
         };
+
         _name = new Label
         {
             Dock = DockStyle.Top,
-            Height = Theme.Space5,
+            Height = Theme.Space3,
             Text = host.Name,
-            Font = Theme.FontBodyStrong,
+            Font = Theme.FontDeviceName,    // 13pt semibold
             ForeColor = Theme.TextPrimary,
             TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true,
         };
+
+        // แถวสถานะ: จุดสี 8px + ข้อความ ชิดขวา
+        var statusRow = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = Theme.Space1,
+            BackColor = Color.Transparent,
+        };
+        _badge = new StatusBadge(StatusKind.Waiting, "รอเชื่อมต่อ")
+        {
+            Dock = DockStyle.Right,
+        };
+        statusRow.Controls.Add(_badge);
+
         _address = new Label
         {
             Dock = DockStyle.Top,
-            Height = Theme.Space4,
+            Height = Theme.Space2,
             Text = host.Address,
             Font = Theme.FontCaption,
             ForeColor = Theme.TextMuted,
             TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true,
         };
-        _badge = new StatusBadge(StatusKind.Waiting, "รอเชื่อมต่อ") { Dock = DockStyle.Top, Margin = new Padding(0, Theme.Space1, 0, Theme.Space1) };
+
+        // ปุ่มลัด: ข้อความโผล่ตอน hover ที่มุมล่างขวา
         _shortcuts = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = Theme.ButtonHeight + Theme.Space2,
+            Height = Theme.ButtonHeight,
             FlowDirection = FlowDirection.RightToLeft,
-            BackColor = Theme.Surface,
+            BackColor = Color.Transparent,
             Visible = false,
         };
-        var chat = new UiButton("", ButtonKind.Ghost, UiIcon.Chat) { Width = Theme.ButtonHeight };
+        var chat = new UiButton("แชท", ButtonKind.Ghost, UiIcon.Chat) { Width = Theme.ButtonHeightLarge };
         Theme.SetToolTip(chat, "แชท");
         chat.Click += (_, _) => ChatRequested?.Invoke(this, EventArgs.Empty);
-        var remote = new UiButton("", ButtonKind.Ghost, UiIcon.Monitor) { Width = Theme.ButtonHeight };
+        var remote = new UiButton("ควบคุม", ButtonKind.Ghost, UiIcon.Monitor) { Width = Theme.ButtonHeightLarge };
         Theme.SetToolTip(remote, "ควบคุมระยะไกล");
         remote.Click += (_, _) => OpenRemoteRequested?.Invoke(this, EventArgs.Empty);
-        var lockBtn = new UiButton("", ButtonKind.Ghost, UiIcon.Lock) { Width = Theme.ButtonHeight };
+        var lockBtn = new UiButton("ล็อก", ButtonKind.Ghost, UiIcon.Lock) { Width = Theme.ButtonHeightLarge };
         Theme.SetToolTip(lockBtn, "ล็อกหน้าจอ");
         lockBtn.Click += (_, _) => LockRequested?.Invoke(this, EventArgs.Empty);
-        _shortcuts.Controls.Add(chat);
-        _shortcuts.Controls.Add(remote);
         _shortcuts.Controls.Add(lockBtn);
+        _shortcuts.Controls.Add(remote);
+        _shortcuts.Controls.Add(chat);
 
         surface.Controls.Add(_pic);
         surface.Controls.Add(_shortcuts);
-        surface.Controls.Add(_badge);
         surface.Controls.Add(_address);
+        surface.Controls.Add(statusRow);
         surface.Controls.Add(_name);
+
+        Controls.Add(_topLine);
         Controls.Add(surface);
 
         void Select(object? s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Selected = !Selected; }
@@ -162,6 +198,14 @@ internal sealed class HostTile : UserControl, ITile
         }
         Hover(this);
         AccessibleName = $"เครื่อง {host.Name}";
+    }
+
+    private void UpdateBorder()
+    {
+        _topLine.Height = _selected ? 2 : 1;
+        _topLine.BackColor = _selected ? Theme.Accent : Theme.Border;
+        if (_hasUnread)
+            _topLine.BackColor = Theme.Waiting;
     }
 
     public void Start() => _ = PollLoopAsync();
@@ -243,13 +287,14 @@ internal sealed class HostTile : UserControl, ITile
     }
 }
 
-/// <summary>การ์ดสำหรับโหมดตัวอย่าง UI: แสดงสถานะจำลองโดยไม่เชื่อมต่อเครือข่าย</summary>
+/// <summary>การ์ดสำหรับโหมดตัวอย่าง UI: สไตล์เดียวกับ Hosttile แต่ไม่เชื่อมต่อเครือข่าย</summary>
 internal sealed class PreviewHostTile : UserControl, ITile
 {
     private readonly PictureBox _pic;
     private readonly Label _name;
     private readonly Label _address;
     private readonly StatusBadge _badge;
+    private readonly Panel _topLine;
     private bool _selected;
     private bool _hasUnread;
 
@@ -275,33 +320,60 @@ internal sealed class PreviewHostTile : UserControl, ITile
 
         Size = new Size(Theme.CardWidth, Theme.CardHeight);
         Margin = new Padding(Theme.Space2);
-        Padding = new Padding(Theme.Space1);
-        BackColor = Theme.Border;
+        Padding = Padding.Empty;
+        BackColor = Theme.ZoneContent;
         DoubleBuffered = true;
 
-        var surface = new UiCard { Dock = DockStyle.Fill, Padding = new Padding(Theme.Space2) };
-        _pic = new UiPictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
-        // ยังไม่มีภาพตัวอย่าง ให้แสดงไอคอนเครื่องจางๆ แทน
-        _pic.Image = UiIcons.Get(UiIcon.Computer, Theme.TextDisabled, 48);
+        _topLine = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 1,
+            BackColor = Theme.Border,
+        };
+
+        var surface = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.ZoneContent,
+            Padding = new Padding(Theme.Space2),
+        };
+
+        _pic = new UiPictureBox
+        {
+            Dock = DockStyle.Fill,
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Theme.Surface,
+        };
+        _pic.Image = UiIcons.Get(UiIcon.Computer, Theme.TextDisabled, Theme.IconSize); // ไอคอนเล็กตาม spec
+        _pic.Paint += (_, e) =>
+        {
+            if (_pic.Image is null)
+            {
+                e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                var msg = "ไม่มีภาพ";
+                var size = TextRenderer.MeasureText(msg, Theme.FontBody);
+                var x = (_pic.Width - size.Width) / 2;
+                var y = (_pic.Height - size.Height) / 2;
+                TextRenderer.DrawText(e.Graphics, msg, Theme.FontBody, new Point(x, y), Theme.TextMuted);
+            }
+        };
+
         _name = new Label
         {
             Dock = DockStyle.Top,
-            Height = Theme.Space5,
+            Height = Theme.Space3,
             Text = host.Name,
-            Font = Theme.FontBodyStrong,
+            Font = Theme.FontDeviceName,
             ForeColor = Theme.TextPrimary,
             TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true,
         };
-        _address = new Label
+
+        var statusRow = new Panel
         {
             Dock = DockStyle.Top,
-            Height = Theme.Space4,
-            Text = host.Address,
-            Font = Theme.FontCaption,
-            ForeColor = Theme.TextMuted,
-            TextAlign = ContentAlignment.MiddleLeft,
-            AutoEllipsis = true,
+            Height = Theme.Space1,
+            BackColor = Color.Transparent,
         };
         var statusText = kind switch
         {
@@ -310,12 +382,26 @@ internal sealed class PreviewHostTile : UserControl, ITile
             StatusKind.Error => "ผิดพลาด",
             _ => "ออฟไลน์",
         };
-        _badge = new StatusBadge(kind, statusText) { Dock = DockStyle.Top, Margin = new Padding(0, Theme.Space1, 0, Theme.Space1) };
+        _badge = new StatusBadge(kind, statusText) { Dock = DockStyle.Right };
+        statusRow.Controls.Add(_badge);
+
+        _address = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = Theme.Space2,
+            Text = host.Address,
+            Font = Theme.FontCaption,
+            ForeColor = Theme.TextMuted,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+        };
 
         surface.Controls.Add(_pic);
-        surface.Controls.Add(_badge);
         surface.Controls.Add(_address);
+        surface.Controls.Add(statusRow);
         surface.Controls.Add(_name);
+
+        Controls.Add(_topLine);
         Controls.Add(surface);
 
         void Select(object? s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Selected = !Selected; }
@@ -324,10 +410,13 @@ internal sealed class PreviewHostTile : UserControl, ITile
         AccessibleName = $"เครื่อง {host.Name}";
     }
 
-    private void UpdateBorder() => BackColor =
-        _hasUnread ? Theme.Waiting :
-        _selected ? Theme.AccentHover :
-        Theme.Border;
+    private void UpdateBorder()
+    {
+        _topLine.Height = _selected ? 2 : 1;
+        _topLine.BackColor = _selected ? Theme.Accent : Theme.Border;
+        if (_hasUnread)
+            _topLine.BackColor = Theme.Waiting;
+    }
 
     public void Start() { }
     public void Reconnect() { }
