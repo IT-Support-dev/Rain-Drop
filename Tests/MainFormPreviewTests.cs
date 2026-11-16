@@ -20,7 +20,7 @@ public class MainFormPreviewTests
         var joined = t.Join(timeoutSeconds * 1000);
         if (!joined)
         {
-            t.Abort();
+            // .NET 8 ไม่รองรับ Thread.Abort() ปล่อยให้เธรดทำงานต่อไปในพื้นหลัง
             throw new TimeoutException($"เทสต์ค้างเกิน {timeoutSeconds} วินาที (WinForms อาจเริ่มต้นไม่ได้บนเครื่องนี้)");
         }
     }
