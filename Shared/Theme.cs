@@ -18,6 +18,12 @@ internal static class Theme
     internal static readonly Color InputBackground = Color.FromArgb(30, 31, 34);
     internal static readonly Color PlaceholderText = Color.FromArgb(148, 155, 164);
 
+    // Zone aliases for explicit visual separation in MainForm
+    internal static readonly Color ZoneContent = Background;      // พื้นที่เนื้อหา (เข้มสุด)
+    internal static readonly Color ZoneSidebar = Surface;          // แถบซ้าย
+    internal static readonly Color ZoneHeader = SurfaceAlt;         // หัวเครื่องมือ
+    internal static readonly Color ZoneStatus = SurfaceHover;       // แถบสถานะล่าง
+
     // Text (contrast-tested against the surfaces where they are used)
     internal static readonly Color TextPrimary = Color.FromArgb(242, 243, 245);
     internal static readonly Color TextSecondary = Color.FromArgb(219, 222, 225);

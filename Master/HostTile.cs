@@ -1,12 +1,26 @@
+using System.Drawing.Drawing2D;
 using RainDrop.Shared;
 
 namespace RainDrop.Master;
+
+/// <summary>สมาชิกร่วมของการ์ดเครื่องที่ใช้ทั้งโหมดจริงและโหมดตัวอย่าง</summary>
+internal interface ITile : IDisposable
+{
+    HostEntry Host { get; }
+    bool IsOnline { get; }
+    bool Selected { get; set; }
+    bool HasUnread { get; set; }
+    bool Visible { get; set; }
+    AgentClient? Client { get; }
+    void Start();
+    void Reconnect();
+}
 
 /// <summary>
 /// การ์ดเครื่องลูก 1 เครื่อง: ชื่อ สถานะ IP และภาพย่อ
 /// ตรรกะเชื่อมต่อ/ดึงภาพเหมือนเดิม; ปุ่มลัดแสดงเมื่อชี้เมาส์
 /// </summary>
-internal sealed class HostTile : UserControl
+internal sealed class HostTile : UserControl, ITile
 {
     private readonly PictureBox _pic;
     private readonly Label _name;
@@ -230,7 +244,7 @@ internal sealed class HostTile : UserControl
 }
 
 /// <summary>การ์ดสำหรับโหมดตัวอย่าง UI: แสดงสถานะจำลองโดยไม่เชื่อมต่อเครือข่าย</summary>
-internal sealed class PreviewHostTile : UserControl
+internal sealed class PreviewHostTile : UserControl, ITile
 {
     private readonly PictureBox _pic;
     private readonly Label _name;
@@ -251,6 +265,8 @@ internal sealed class PreviewHostTile : UserControl
         get => _hasUnread;
         set { _hasUnread = value; UpdateBorder(); }
     }
+    public bool Visible { get => base.Visible; set => base.Visible = value; }
+    public AgentClient? Client => null;
 
     public PreviewHostTile(HostEntry host, StatusKind kind)
     {

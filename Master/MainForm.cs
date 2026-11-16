@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using RainDrop.Shared;
 
@@ -18,9 +19,10 @@ internal sealed class MainForm : Form
     private readonly FlowLayoutPanel _panel;                 // ตารางการ์ดเครื่อง (เนื้อหาจริง)
     private readonly FlowLayoutPanel _channelList = new UiFlowPanel();   // รายการเครื่องในแถบซ้าย
     private readonly Label _status = new();
+    private readonly Label _count = new() { AutoSize = true, Font = Theme.FontCaption, ForeColor = Theme.TextMuted };
     private readonly System.Windows.Forms.Timer _sidebarTimer = new() { Interval = 1500 };
-    private readonly List<HostTile> _tiles = new();
-    private readonly Dictionary<HostTile, ChatWindow> _chats = new();
+    private readonly List<ITile> _tiles = new();
+    private readonly Dictionary<ITile, ChatWindow> _chats = new();
     private readonly string _myName = $"ผู้ดูแลระบบ ({Environment.UserName})";
     private readonly NotifyIcon _tray = new() { Icon = AppIcon.Load(), Text = "Rain Drop Master", Visible = true };
     private readonly List<AlertMsg> _alertLog = new();
@@ -127,7 +129,7 @@ internal sealed class MainForm : Form
         };
         var logo = new PictureBox
         {
-            Image = AppIcon.Load(),
+            Image = AppIcon.Load().ToBitmap(),
             Size = new Size(Theme.IconSizeLarge * 2, Theme.IconSizeLarge * 2),
             SizeMode = PictureBoxSizeMode.Zoom,
             BackColor = Color.Transparent,
@@ -461,7 +463,7 @@ internal sealed class MainForm : Form
         menu.Show(Cursor.Position);
     }
 
-    private readonly Dictionary<HostTile, Label> _channelRows = new();
+    private readonly Dictionary<ITile, Label> _channelRows = new();
     private string _sidebarSignature = "";
     private string _query = "";
     private MachineStatusFilter _statusFilter = MachineStatusFilter.All;
@@ -525,7 +527,7 @@ internal sealed class MainForm : Form
         finally { _channelList.ResumeLayout(); }
     }
 
-    private Label CreateChannelRow(HostTile tile)
+    private Label CreateChannelRow(ITile tile)
     {
         var row = new Label
         {
@@ -724,7 +726,7 @@ internal sealed class MainForm : Form
         OpenRemote(tile);
     }
 
-    private void OpenRemote(HostTile tile)
+    private void OpenRemote(ITile tile)
     {
         if (_uiPreview)
         {
@@ -734,7 +736,7 @@ internal sealed class MainForm : Form
         new RemoteForm(tile.Host, _settings, _key, _pki).Show();
     }
 
-    private void OpenActivity(HostTile tile) => new ActivityForm(tile.Host, _settings, _key, _pki).Show();
+    private void OpenActivity(ITile tile) => new ActivityForm(tile.Host, _settings, _key, _pki).Show();
 
     private void OpenActivityForSelected()
     {
@@ -745,7 +747,7 @@ internal sealed class MainForm : Form
 
     // ---------- แชท ----------
 
-    private ChatWindow GetChat(HostTile tile)
+    private ChatWindow GetChat(ITile tile)
     {
         if (_chats.TryGetValue(tile, out var existing) && !existing.IsDisposed)
             return existing;
@@ -769,7 +771,7 @@ internal sealed class MainForm : Form
         return chat;
     }
 
-    private void OpenChat(HostTile tile)
+    private void OpenChat(ITile tile)
     {
         tile.HasUnread = false;
         GetChat(tile).ShowAndNotify(activate: true);
@@ -786,7 +788,7 @@ internal sealed class MainForm : Form
         foreach (var tile in selected) OpenChat(tile);
     }
 
-    private void OnChatReceived(HostTile tile, ChatMsg msg)
+    private void OnChatReceived(ITile tile, ChatMsg msg)
     {
         if (_uiPreview) return;
         var chat = GetChat(tile);
@@ -796,7 +798,7 @@ internal sealed class MainForm : Form
         _status.Text = $"ข้อความใหม่จาก {tile.Host.Name}: {msg.Text}";
     }
 
-    private void OnVoiceReceived(HostTile tile, VoiceMsg msg)
+    private void OnVoiceReceived(ITile tile, VoiceMsg msg)
     {
         if (_uiPreview) return;
         var chat = GetChat(tile);
@@ -808,7 +810,7 @@ internal sealed class MainForm : Form
 
     // ---------- คำสั่งกลุ่ม ----------
 
-    private List<HostTile> Targets()
+    private List<ITile> Targets()
     {
         var selected = _tiles.Where(t => t.Selected).ToList();
         return selected.Count > 0 ? selected : _tiles;
@@ -924,7 +926,7 @@ internal sealed class MainForm : Form
 
     // ---------- การแจ้งเตือนจากเครื่องลูก ----------
 
-    private void OnAlertReceived(HostTile tile, AlertMsg msg)
+    private void OnAlertReceived(ITile tile, AlertMsg msg)
     {
         if (_uiPreview) return;
         _alertLog.Insert(0, msg);
@@ -1002,7 +1004,7 @@ internal sealed class MainForm : Form
         foreach (var tile in targets)
         {
             _settings.Blocklists[tile.Host.Name] = result;
-            tile.SetBlocklist(result);
+            if (tile is HostTile ht) ht.SetBlocklist(result);
         }
         _settings.Save();
         _status.Text = $"ตั้งรายการบล็อกให้ {targets.Count} เครื่องแล้ว (โปรแกรม {result.Programs.Count}, เว็บ {result.Urls.Count})";
