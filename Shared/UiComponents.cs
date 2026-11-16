@@ -221,7 +221,7 @@ internal static class UiInput
     {
         private bool _showPlaceholder;
 
-        public override string? PlaceholderText
+        public override string PlaceholderText
         {
             get => base.PlaceholderText;
             set { base.PlaceholderText = value; UpdatePlaceholder(); Invalidate(); }
@@ -262,7 +262,7 @@ internal static class UiInput
             base.OnPaint(e);
             if (_showPlaceholder)
             {
-                TextRenderer.DrawText(e.Graphics, _placeholder, Font,
+                TextRenderer.DrawText(e.Graphics, PlaceholderText, Font,
                     new Rectangle(Theme.Space2, 0, Width - Theme.Space4, Height),
                     Theme.PlaceholderText, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
             }
