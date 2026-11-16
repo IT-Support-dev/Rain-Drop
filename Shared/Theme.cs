@@ -36,12 +36,12 @@ internal static class Theme
     internal static readonly Color TextPrimary = Color.FromArgb(242, 243, 245);
     internal static readonly Color TextSecondary = Color.FromArgb(219, 222, 225);
     internal static readonly Color TextMuted = Color.FromArgb(148, 155, 164);
-    internal static readonly Color TextDisabled = Color.FromArgb(108, 113, 120);
+    internal static readonly Color TextDisabled = Color.FromArgb(161, 161, 170);
     internal static readonly Color OnAccent = Color.White;
 
     // ---------- สีเน้นเดียว + สถานะ ----------
-    internal static readonly Color Accent = Color.FromArgb(59, 130, 246);   // #3B82F6 ฟ้า — ปุ่มหลัก / เลือกเท่านั้น
-    internal static readonly Color AccentHover = Color.FromArgb(37, 99, 235);
+    internal static readonly Color Accent = Color.FromArgb(37, 99, 235);   // #3B82F6 ฟ้า — ปุ่มหลัก / เลือกเท่านั้น
+    internal static readonly Color AccentHover = Color.FromArgb(59, 130, 246);
     internal static readonly Color AccentPressed = Color.FromArgb(29, 78, 216);
     internal static readonly Color Online = Color.FromArgb(74, 222, 128);    // เขียว
     internal static readonly Color Waiting = Color.FromArgb(251, 191, 36);   // เหลือง
@@ -51,7 +51,7 @@ internal static class Theme
     internal static readonly Color DangerPressed = Mix(DangerBackground, Color.Black, 0.2);
     internal const double BadgeBackgroundMix = 0.95;
     internal static readonly Color Offline = Color.FromArgb(148, 155, 164);   // เทา
-    internal static readonly Color Link = Color.FromArgb(59, 130, 246);
+    internal static readonly Color Link = Color.FromArgb(96, 165, 250);
     internal static readonly Color ChatBubbleMine = Mix(Accent, Surface, 0.65);
     internal static readonly Color ChatBubbleTheirs = SurfaceAlt;
 

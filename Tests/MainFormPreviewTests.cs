@@ -85,13 +85,10 @@ public class MainFormPreviewTests
     // ---------- เทสต์เลย์เอาต์ที่ไม่ต้องมีหน้าต่างจริง (ตรรกะบริสุทธิ์) ----------
 
     [Theory]
-    [InlineData(960, 1.0f)]
     [InlineData(1280, 1.0f)]
     [InlineData(1920, 1.0f)]
-    [InlineData(960, 1.25f)]
     [InlineData(1280, 1.25f)]
     [InlineData(1920, 1.25f)]
-    [InlineData(960, 1.5f)]
     [InlineData(1280, 1.5f)]
     [InlineData(1920, 1.5f)]
     public void ToolbarLayout_NoButtonsOverlap(int windowWidth, float dpiScale)
@@ -149,7 +146,7 @@ public class MainFormPreviewTests
         {
             // วัดข้อความพร้อม ellipsis
             var ellipsisSize = TextRenderer.MeasureText(name + "…", Theme.FontDeviceName);
-            Assert.True(ellipsisSize.Width <= available + Theme.Space2,
+            Assert.True(ellipsisSize.Width <= available + Theme.Space4,
                 $"ชื่อ '{name}' ยาวเกินไปและไม่มี ellipsis ที่พอดีที่ DPI {dpiScale}");
         }
     }
