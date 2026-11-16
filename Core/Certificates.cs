@@ -80,15 +80,27 @@ public static class RepoCertificates
         serial[15] |= 1;
         var now = DateTime.UtcNow;
         // ca อาจถูกโหลดจาก PEM เฉพาะส่วนสาธารณะ (ไม่มี private key ผูกอยู่) เช่น
-        // ตอนโหลดจากที่เก็บใน MasterPki.LoadOrCreate จึงต้องนำ caKey ที่แยกเก็บไว้
-        // มารวมกับ ca ก่อนส่งให้ CertificateRequest.Create แทนการพึ่งว่า ca มี key อยู่แล้ว
-        using var caWithKey = ca.CopyWithPrivateKey(caKey);
-        using var issued = request.Create(caWithKey, now.AddMinutes(-5), notAfter, serial);
-        // Detach the private key from the short-lived request key so disposing the request
-        // key cannot invalidate the returned certificate on Windows CNG.
-        var detached = ECDsa.Create();
-        detached.ImportPkcs8PrivateKey(key.ExportPkcs8PrivateKey(), out _);
-        return issued.CopyWithPrivateKey(detached);
+        // ตอนโหลดจากที่เก็บใน MasterPki.LoadOrCreate ในกรณีนั้นต้องนำ caKey ที่แยกเก็บ
+        // ไว้มารวมกับ ca ก่อนส่งให้ CertificateRequest.Create แต่ถ้า ca มี key อยู่แล้ว
+        // (เช่น CreateCa() ในเทสต์) ให้ใช้ ca โดยตรง เพื่อไม่ให้ CopyWithPrivateKey โยน
+        // "certificate already has an associated private key"
+        X509Certificate2 caForSigning = ca.HasPrivateKey ? ca : ca.CopyWithPrivateKey(caKey);
+        try
+        {
+            using var issued = request.Create(caForSigning, now.AddMinutes(-5), notAfter, serial);
+
+            // Detach the private key from the short-lived request key so disposing the request
+            // key cannot invalidate the returned certificate on Windows CNG.
+            var detached = ECDsa.Create();
+            detached.ImportPkcs8PrivateKey(key.ExportPkcs8PrivateKey(), out _);
+            return issued.CopyWithPrivateKey(detached);
+        }
+        finally
+        {
+            // caForSigning เป็นตัวที่เราสร้างขึ้นเองจาก CopyWithPrivateKey ต้องทิ้งหลังใช้
+            // ถ้า ca มี key อยู่แล้ว caForSigning จะอ้างถึงพารามิเตอร์ ca โดยตรง ไม่ต้องทิ้ง
+            if (!ca.HasPrivateKey) caForSigning?.Dispose();
+        }
     }
 
     /// <summary>
