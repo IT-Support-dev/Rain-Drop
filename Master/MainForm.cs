@@ -32,12 +32,9 @@ internal sealed class MainForm : Form
 
     public MainForm(string[] args)
     {
+        // --ui-preview ต้องถูกระบุด้วยตนเองผ่านบรรทัดคำสั่ง จึงปลอดภัยที่จะเปิดในทุกบิลด์
+        // (ไม่เขียนตั้งค่า ไม่เชื่อมต่อเครือข่าย ไม่เริ่ม polling)
         _uiPreview = args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase);
-
-#if !DEBUG
-        // --ui-preview เปิดได้เฉพาะบิลด์ DEBUG เท่านั้น ป้องกันไม่ให้ติดไปกับตัวติดตั้งจริง
-        _uiPreview = false;
-#endif
 
         Text = "Rain Drop Master";
         Icon = AppIcon.Load();
