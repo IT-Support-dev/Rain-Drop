@@ -219,13 +219,12 @@ internal static class UiInput
 
     private sealed class PlaceholderTextBox : TextBox
     {
-        private string _placeholder = "";
         private bool _showPlaceholder;
 
-        public string PlaceholderText
+        public override string PlaceholderText
         {
-            get => _placeholder;
-            set { _placeholder = value; UpdatePlaceholder(); Invalidate(); }
+            get => base.PlaceholderText;
+            set { base.PlaceholderText = value; UpdatePlaceholder(); Invalidate(); }
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -255,7 +254,7 @@ internal static class UiInput
 
         private void UpdatePlaceholder()
         {
-            _showPlaceholder = string.IsNullOrEmpty(Text) && !Focused && !string.IsNullOrEmpty(_placeholder);
+            _showPlaceholder = string.IsNullOrEmpty(Text) && !Focused && !string.IsNullOrEmpty(base.PlaceholderText);
         }
 
         protected override void OnPaint(PaintEventArgs e)
