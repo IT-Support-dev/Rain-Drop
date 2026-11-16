@@ -144,6 +144,9 @@ internal sealed class MasterPki : IDisposable
         return key;
     }
 
+    /// <summary>ออก client certificate ของ Master ด้วยคู่กุญแจ CA ที่โหลดไว้ (ใช้สำหรับเทสต์เส้นทางจริง)</summary>
+    internal X509Certificate2 IssueClientCertificate() => RepoCertificates.IssueClient(_ca, _caKey);
+
     public RevocationList Revoke(string machineName)
     {
         lock (_gate)

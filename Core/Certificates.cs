@@ -79,7 +79,11 @@ public static class RepoCertificates
         serial[0] &= 0x7f; // Positive, non-zero X.509 serial, independent of byte-order conventions.
         serial[15] |= 1;
         var now = DateTime.UtcNow;
-        using var issued = request.Create(ca, now.AddMinutes(-5), notAfter, serial);
+        // ca อาจถูกโหลดจาก PEM เฉพาะส่วนสาธารณะ (ไม่มี private key ผูกอยู่) เช่น
+        // ตอนโหลดจากที่เก็บใน MasterPki.LoadOrCreate จึงต้องนำ caKey ที่แยกเก็บไว้
+        // มารวมกับ ca ก่อนส่งให้ CertificateRequest.Create แทนการพึ่งว่า ca มี key อยู่แล้ว
+        using var caWithKey = ca.CopyWithPrivateKey(caKey);
+        using var issued = request.Create(caWithKey, now.AddMinutes(-5), notAfter, serial);
         // Detach the private key from the short-lived request key so disposing the request
         // key cannot invalidate the returned certificate on Windows CNG.
         var detached = ECDsa.Create();
