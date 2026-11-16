@@ -14,10 +14,8 @@ internal sealed class MainForm : Form
     private readonly MasterKey _key;
     private readonly MasterPki _pki;
     private readonly FlowLayoutPanel _panel;                 // ตารางจอภาพ (เนื้อหาจริง)
-    private readonly FlowLayoutPanel _channelList = new();   // รายการ "ช่อง" = เครื่องลูก (แถบซ้าย)
-    private readonly FlowLayoutPanel _memberList = new();    // รายชื่อออนไลน์ (แถบขวา)
+    private readonly FlowLayoutPanel _channelList = new UiFlowPanel();   // รายการ "ช่อง" = เครื่องลูก (แถบซ้าย)
     private readonly Label _status = new();
-    private readonly Label _memberHeader = new();
     private readonly System.Windows.Forms.Timer _sidebarTimer = new() { Interval = 1500 };
     private readonly List<HostTile> _tiles = new();
     private readonly Dictionary<HostTile, ChatWindow> _chats = new();
@@ -30,202 +28,183 @@ internal sealed class MainForm : Form
     {
         Text = "Rain Drop Master";
         Icon = AppIcon.Load();
-        Size = new Size(1400, 860);
-        StartPosition = FormStartPosition.CenterScreen;
-        Font = DiscordTheme.FontUi;
+        Theme.ConfigureForm(this, new Size(900, 600));
+        UiWindowPlacement.Attach(this, "master", new Size(1400, 860), new Size(900, 600));
 
         _settings = MasterSettings.Load();
         _key = MasterKey.LoadOrCreate();
         _pki = MasterPki.LoadOrCreate();
 
-        BackColor = DiscordTheme.Content;
-        _panel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = DiscordTheme.Content, Padding = new Padding(10) };
-
-        Controls.Add(BuildContent());   // Fill (กลาง)
-        Controls.Add(BuildMembers());   // Right
-        Controls.Add(BuildSidebar());   // Left (แถบช่อง)
-        Controls.Add(BuildServerRail()); // Left (แถบเซิร์ฟเวอร์ ซ้ายสุด)
+        _panel = new UiFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.Background };
+        var content = BuildContent();
+        content.TabIndex = 1;
+        Controls.Add(content);
+        var sidebar = BuildSidebar();
+        sidebar.TabIndex = 0;
+        Controls.Add(sidebar);
 
         foreach (var host in _settings.Hosts)
             AddTile(host);
+        ApplyFilter();
 
-        _sidebarTimer.Tick += (_, _) => RefreshSidebars();
+        _sidebarTimer.Tick += (_, _) => ApplyFilter();
         _sidebarTimer.Start();
         RefreshSidebars();
     }
 
-    // ===================== หน้าตาแบบ Discord =====================
+    // ===================== โครงหน้าจอมืดแบบ token =====================
 
-    /// <summary>แถบเซิร์ฟเวอร์ซ้ายสุด (ตกแต่งเลียนแบบ Discord)</summary>
-    private Control BuildServerRail()
-    {
-        var rail = new Panel { Dock = DockStyle.Left, Width = 72, BackColor = DiscordTheme.ServerRail };
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = DiscordTheme.ServerRail, Padding = new Padding(0, 12, 0, 0) };
+    private readonly TextBox _search = UiInput.Create();
+    private readonly ComboBox _filter = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly Label _count = new() { AutoSize = true, Font = Theme.FontCaption, ForeColor = Theme.TextMuted };
+    private readonly Panel _empty = new() { Dock = DockStyle.Fill, BackColor = Theme.Background };
+    private string _query = "";
+    private MachineStatusFilter _statusFilter = MachineStatusFilter.All;
 
-        var logo = DiscordTheme.ServerIcon("RD", DiscordTheme.Blurple, "Rain Drop");
-        var classroom = DiscordTheme.ServerIcon("ห้อง", Color.FromArgb(87, 150, 120), "ห้องเรียน");
-        var add = DiscordTheme.ServerIcon("＋", Color.FromArgb(53, 55, 60), "เพิ่มเครื่องเอง");
-        add.Click += (_, _) => AddHost();
-
-        flow.Controls.Add(logo);
-        flow.Controls.Add(new Panel { Size = new Size(48, 2), Margin = new Padding(12, 2, 12, 6), BackColor = Color.FromArgb(53, 55, 60) });
-        flow.Controls.Add(classroom);
-        flow.Controls.Add(add);
-        rail.Controls.Add(flow);
-        return rail;
-    }
-
-    /// <summary>แถบช่อง = รายการเครื่องลูก + แผงผู้ใช้ด้านล่าง</summary>
     private Control BuildSidebar()
     {
-        var sidebar = new Panel { Dock = DockStyle.Left, Width = 240, BackColor = DiscordTheme.Sidebar };
-
-        var header = new Label { Dock = DockStyle.Top, Height = 48, Text = "  Rain Drop", ForeColor = DiscordTheme.TextBright, Font = DiscordTheme.FontHeaderBold, TextAlign = ContentAlignment.MiddleLeft, BackColor = DiscordTheme.Sidebar };
-        var cat = new Label { Dock = DockStyle.Top, Height = 26, Text = "▾  เครื่องในเครือข่าย", ForeColor = DiscordTheme.TextMuted, Font = DiscordTheme.FontTinyBold, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 6, 0, 0) };
+        var sidebar = new Panel { Dock = DockStyle.Left, Width = Theme.SidebarWidth, BackColor = Theme.Surface, Padding = new Padding(Theme.Space3) };
+        var header = new Label { Dock = DockStyle.Top, Height = Theme.ToolbarHeight, Text = "Rain Drop", ForeColor = Theme.TextPrimary, Font = Theme.FontHeading, TextAlign = ContentAlignment.MiddleLeft };
+        _search.Dock = DockStyle.Top;
+        _search.TabIndex = 0;
+        _search.AccessibleName = "ค้นหาเครื่อง";
+        Theme.SetToolTip(_search, "ค้นหาชื่อเครื่องหรือ IP");
+        _search.TextChanged += (_, _) => { _query = _search.Text; ApplyFilter(); };
+        _filter.Dock = DockStyle.Top;
+        _filter.TabIndex = 1;
+        _filter.Font = Theme.FontBody;
+        _filter.BackColor = Theme.InputBackground;
+        _filter.ForeColor = Theme.TextPrimary;
+        _filter.FlatStyle = FlatStyle.Flat;
+        _filter.Items.AddRange(new object[] { "ทุกสถานะ", "ออนไลน์", "ออฟไลน์" });
+        _filter.SelectedIndex = 0;
+        _filter.AccessibleName = "กรองสถานะเครื่อง";
+        _filter.SelectedIndexChanged += (_, _) => { _statusFilter = (MachineStatusFilter)_filter.SelectedIndex; ApplyFilter(); };
+        _count.Dock = DockStyle.Top;
+        _count.Padding = new Padding(0, Theme.Space2, 0, Theme.Space2);
 
         _channelList.Dock = DockStyle.Fill;
         _channelList.FlowDirection = FlowDirection.TopDown;
         _channelList.WrapContents = false;
         _channelList.AutoScroll = true;
-        _channelList.BackColor = DiscordTheme.Sidebar;
-        _channelList.Padding = new Padding(6, 2, 6, 2);
+        _channelList.BackColor = Theme.Surface;
 
-        // แผงผู้ใช้ด้านล่าง (เลียนแบบ Discord)
-        var user = new Panel { Dock = DockStyle.Bottom, Height = 52, BackColor = DiscordTheme.ServerRail };
-        var avatar = DiscordTheme.ServerIcon("A", DiscordTheme.Blurple);
-        avatar.Size = new Size(34, 34);
-        avatar.Margin = new Padding(8, 9, 6, 9);
-        var uname = new Label { Dock = DockStyle.Fill, Text = "ผู้ดูแลระบบ\n● ออนไลน์", ForeColor = DiscordTheme.TextNormal, Font = DiscordTheme.FontTiny, TextAlign = ContentAlignment.MiddleLeft };
-        var gear = DiscordTheme.HeaderButton("⚙");
-        gear.Dock = DockStyle.Right;
-        gear.Click += (_, _) => ShowSettings();
-        user.Controls.Add(uname);
-        user.Controls.Add(gear);
-        var av = new Panel { Dock = DockStyle.Left, Width = 48, BackColor = DiscordTheme.ServerRail };
-        av.Controls.Add(avatar);
-        user.Controls.Add(av);
+        var settings = new UiButton("ตั้งค่า", ButtonKind.Ghost, UiIcon.Settings) { Dock = DockStyle.Bottom };
+        settings.TabIndex = 4;
+        settings.Click += (_, _) => ShowSettings();
+        var community = new UiButton("ชุมชน", ButtonKind.Ghost, UiIcon.Chat) { Dock = DockStyle.Bottom };
+        community.TabIndex = 3;
+        community.Click += (_, _) => OpenCommunity();
+        var add = new UiButton("เพิ่มเครื่อง", ButtonKind.Secondary, UiIcon.Plus) { Dock = DockStyle.Bottom };
+        add.TabIndex = 2;
+        add.Click += (_, _) => AddHost();
 
         sidebar.Controls.Add(_channelList);
-        sidebar.Controls.Add(user);
-        sidebar.Controls.Add(cat);
+        sidebar.Controls.Add(_count);
+        sidebar.Controls.Add(_filter);
+        sidebar.Controls.Add(_search);
         sidebar.Controls.Add(header);
+        sidebar.Controls.Add(settings);
+        sidebar.Controls.Add(community);
+        sidebar.Controls.Add(add);
         return sidebar;
     }
 
-    /// <summary>พื้นที่กลาง: แถบหัวเรื่อง + ปุ่มคำสั่ง + ตารางจอภาพ</summary>
     private Control BuildContent()
     {
-        var center = new Panel { Dock = DockStyle.Fill, BackColor = DiscordTheme.Content };
+        var center = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Background };
+        var toolbar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Theme.ToolbarHeight, Padding = new Padding(Theme.Space3, Theme.Space2, Theme.Space3, Theme.Space2), BackColor = Theme.Background, WrapContents = false, AutoScroll = true };
+        void Tool(UiIcon icon, string tip, Action act, ButtonKind kind = ButtonKind.Ghost)
+        {
+            var b = new UiButton("", kind, icon) { Width = Theme.ButtonHeightLarge, Height = Theme.ButtonHeight };
+            Theme.SetToolTip(b, tip);
+            b.Click += (_, _) => act();
+            toolbar.Controls.Add(b);
+        }
+        void Sep() => toolbar.Controls.Add(new Panel { Width = 1, Height = Theme.ButtonHeight, BackColor = Theme.Border, Margin = new Padding(Theme.Space2, Theme.Space1, Theme.Space2, Theme.Space1) });
+        Tool(UiIcon.Refresh, "ค้นหาเครื่องในเครือข่าย", () => _ = DiscoverAsync(userInitiated: true));
+        Tool(UiIcon.Plus, "เพิ่มเครื่องเอง", AddHost);
+        Sep();
+        Tool(UiIcon.Monitor, "ควบคุมระยะไกล", OpenRemoteForSelected);
+        Tool(UiIcon.Chat, "แชท", OpenChatForSelected);
+        Tool(UiIcon.Message, "ส่งข้อความ", SendMessageToTargets);
+        Sep();
+        Tool(UiIcon.Lock, "ล็อกหน้าจอ", LockTargets);
+        Tool(UiIcon.Unlock, "ปลดล็อก", () => Broadcast(c => c.Send(MsgType.Unlock)));
+        Tool(UiIcon.Power, "ปิดเครื่อง", () => Power(PowerAction.Shutdown, "ปิดเครื่อง"), ButtonKind.Danger);
+        Sep();
+        Tool(UiIcon.Activity, "ดูกิจกรรม", OpenActivityForSelected);
+        Tool(UiIcon.Block, "บล็อกโปรแกรม/เว็บ", OpenBlockSettings);
+        Tool(UiIcon.More, "เพิ่มเติม", ShowMoreMenu);
 
-        var header = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = DiscordTheme.Content };
-        var title = new Label { Dock = DockStyle.Left, Width = 230, Text = "#  จอภาพเครื่องลูก", ForeColor = DiscordTheme.TextBright, Font = DiscordTheme.FontSubTitleBold, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(14, 0, 0, 0) };
-
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true, BackColor = DiscordTheme.Content, Padding = new Padding(2, 7, 2, 7) };
-        void HB(string text, Action act) { var b = DiscordTheme.HeaderButton(text); b.Click += (_, _) => act(); actions.Controls.Add(b); }
-        HB("🔄 ค้นหา", () => _ = DiscoverAsync(userInitiated: true));
-        HB("＋ เพิ่ม", AddHost);
-        HB("🖥 ควบคุม", OpenRemoteForSelected);
-        HB("🔒 ล็อก", LockTargets);
-        HB("🔓 ปลดล็อก", () => Broadcast(c => c.Send(MsgType.Unlock)));
-        HB("📊 กิจกรรม", OpenActivityForSelected);
-        HB("🚫 บล็อก", OpenBlockSettings);
-        HB("💬 แชท", OpenChatForSelected);
-        HB("📢 ข้อความ", SendMessageToTargets);
-        HB("⏻ ปิดเครื่อง", () => Power(PowerAction.Shutdown, "ปิดเครื่อง"));
-        HB("⋯ เพิ่มเติม", ShowMoreMenu);
-
-        header.Controls.Add(actions);
-        header.Controls.Add(title);
-
+        _panel.Padding = new Padding(Theme.Space3);
+        _empty.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Theme.TextMuted,
+            Font = Theme.FontMedium,
+            Text = "ยังไม่มีเครื่องที่แสดง\nกดค้นหาเพื่อหาเครื่องในแลน หรือเพิ่มเครื่องด้วย IP\nใช้ช่องค้นหา/ตัวกรองด้านซ้ายเพื่อหารายการ",
+        });
         _status.Dock = DockStyle.Bottom;
-        _status.Height = 24;
-        _status.BackColor = DiscordTheme.ServerRail;
-        _status.ForeColor = DiscordTheme.TextMuted;
+        _status.Height = Theme.StatusHeight;
+        _status.BackColor = Theme.Surface;
+        _status.ForeColor = Theme.TextMuted;
         _status.TextAlign = ContentAlignment.MiddleLeft;
-        _status.Padding = new Padding(12, 0, 0, 0);
-        _status.Text = "คลิกช่องทางซ้ายเพื่อเลือกเครื่อง, ดับเบิลคลิกเพื่อควบคุม";
+        _status.Padding = new Padding(Theme.Space3, 0, 0, 0);
+        _status.Text = "เลือกเครื่องเพื่อสั่งงานรายเครื่อง ถ้าไม่เลือกจะส่งไปทุกเครื่อง";
 
         center.Controls.Add(_panel);
+        center.Controls.Add(_empty);
         center.Controls.Add(_status);
-        center.Controls.Add(header);
+        center.Controls.Add(toolbar);
         return center;
     }
 
     private void ShowMoreMenu()
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("ลบเครื่องที่เลือก", null, (_, _) => RemoveSelected());
+        Theme.StyleMenu(menu);
         menu.Items.Add("เลือกทั้งหมด / ไม่เลือก", null, (_, _) => ToggleSelectAll());
+        menu.Items.Add("ลบเครื่องที่เลือก", null, (_, _) => RemoveSelected());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("เปิดเว็บ/โปรแกรม", null, (_, _) => RunOnTargets());
-        menu.Items.Add("บล็อกโปรแกรม / เว็บ...", null, (_, _) => OpenBlockSettings());
-        menu.Items.Add("ชุมชน (แชท/คอลเสียง)", null, (_, _) => OpenCommunity());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(_settings.AlertsEnabled ? "การแจ้งเตือน: เปิดอยู่ (กดเพื่อปิด)" : "การแจ้งเตือน: ปิดอยู่ (กดเพื่อเปิด)",
-            null, (_, _) => ToggleAlerts());
-        menu.Items.Add("ดูการแจ้งเตือนล่าสุด", null, (_, _) => ShowAlertLog());
-        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("รีสตาร์ท", null, (_, _) => Power(PowerAction.Restart, "รีสตาร์ท"));
         menu.Items.Add("ล็อกออฟ", null, (_, _) => Power(PowerAction.Logoff, "ล็อกออฟ"));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_settings.AlertsEnabled ? "การแจ้งเตือน: เปิดอยู่" : "การแจ้งเตือน: ปิดอยู่", null, (_, _) => ToggleAlerts());
+        menu.Items.Add("ดูการแจ้งเตือนล่าสุด", null, (_, _) => ShowAlertLog());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("ส่งออก enrollment bundle...", null, (_, _) => ExportEnrollment());
         menu.Items.Add("เพิกถอนเครื่องที่เลือก", null, (_, _) => RevokeSelected());
         menu.Items.Add("ตรวจสอบ audit chain", null, (_, _) => VerifyAudit());
-        menu.Items.Add("ตั้งค่า / กุญแจ", null, (_, _) => ShowSettings());
+        menu.Closed += (_, _) => menu.Dispose();
         menu.Show(Cursor.Position);
     }
 
-    /// <summary>แถบขวา: รายชื่อออนไลน์ (เลียนแบบ Discord)</summary>
-    private Control BuildMembers()
-    {
-        var members = new Panel { Dock = DockStyle.Right, Width = 220, BackColor = DiscordTheme.Sidebar };
-        _memberHeader.Dock = DockStyle.Top;
-        _memberHeader.Height = 32;
-        _memberHeader.Text = "ออนไลน์";
-        _memberHeader.ForeColor = DiscordTheme.TextMuted;
-        _memberHeader.Font = DiscordTheme.FontTinyBold;
-        _memberHeader.TextAlign = ContentAlignment.MiddleLeft;
-        _memberHeader.Padding = new Padding(14, 8, 0, 0);
-
-        _memberList.Dock = DockStyle.Fill;
-        _memberList.FlowDirection = FlowDirection.TopDown;
-        _memberList.WrapContents = false;
-        _memberList.AutoScroll = true;
-        _memberList.BackColor = DiscordTheme.Sidebar;
-        _memberList.Padding = new Padding(8, 2, 8, 2);
-
-        members.Controls.Add(_memberList);
-        members.Controls.Add(_memberHeader);
-        return members;
-    }
-
-    // ===================== อัปเดตแถบช่อง/รายชื่อจากสถานะเครื่องจริง =====================
-
-    // แคชแถวของแถบข้าง: เดิมสร้างคอนโทรลใหม่ทั้งหมดทุก 1.5 วินาที และ Controls.Clear() ไม่ได้ Dispose ให้
-    // จึงรั่วทั้ง GDI handle และ window handle สะสมเรื่อย ๆ ตอนนี้สร้างครั้งเดียวแล้วอัปเดตเฉพาะค่าที่เปลี่ยน
     private readonly Dictionary<HostTile, Label> _channelRows = new();
-    private readonly List<Label> _memberRows = new();
     private string _sidebarSignature = "";
 
     private void RefreshSidebars()
     {
-        int online = _tiles.Count(t => t.IsOnline);
-        var ordered = _tiles.OrderByDescending(t => t.IsOnline).ThenBy(t => t.Host.Name).ToList();
-
-        // ลายเซ็นของข้อมูลที่ใช้วาด ถ้าเหมือนรอบก่อนแปลว่าไม่มีอะไรเปลี่ยน จึงไม่แตะ UI เลย
         var sig = new StringBuilder();
         foreach (var t in _tiles)
-            sig.Append(t.Host.Name).Append(':').Append(t.IsOnline).Append(':').Append(t.Selected).Append('|');
-        sig.Append("||");
-        foreach (var t in ordered)
-            sig.Append(t.Host.Name).Append(':').Append(t.IsOnline).Append('|');
+            sig.Append(t.Host.Name).Append(':').Append(t.IsOnline).Append(':').Append(t.Selected).Append(':').Append(t.Visible).Append('|');
         string signature = sig.ToString();
         if (signature == _sidebarSignature) return;
         _sidebarSignature = signature;
-
         RefreshChannelRows();
-        _memberHeader.Text = $"ออนไลน์ — {online}";
-        RefreshMemberRows(ordered);
+        _count.Text = UiFilter.CountText(_tiles.Count(t => t.Visible), _tiles.Count);
+    }
+
+    private void ApplyFilter()
+    {
+        foreach (var tile in _tiles)
+            tile.Visible = UiFilter.Matches(_query, _statusFilter, tile.IsOnline, tile.Host.Name, tile.Host.Address);
+        _empty.Visible = !_tiles.Any(t => t.Visible);
+        if (_empty.Visible) _empty.BringToFront();
+        _sidebarSignature = "";
+        RefreshSidebars();
     }
 
     private void RefreshChannelRows()
@@ -233,14 +212,12 @@ internal sealed class MainForm : Form
         _channelList.SuspendLayout();
         try
         {
-            // สร้าง/ทิ้งแถวเฉพาะเมื่อรายชื่อเครื่องเปลี่ยน (เพิ่ม/ลบ) ซึ่งเกิดไม่บ่อย
             bool membershipChanged = _channelRows.Count != _tiles.Count || _tiles.Any(t => !_channelRows.ContainsKey(t));
             if (membershipChanged)
             {
                 foreach (var old in _channelRows.Values)
                 {
                     _channelList.Controls.Remove(old);
-                    old.ContextMenuStrip?.Dispose();
                     old.Dispose();
                 }
                 _channelRows.Clear();
@@ -251,16 +228,14 @@ internal sealed class MainForm : Form
                     _channelList.Controls.Add(row);
                 }
             }
-
-            // นอกนั้นอัปเดตแค่ข้อความ/สีบนแถวเดิม ไม่สร้างคอนโทรลใหม่
             foreach (var tile in _tiles)
             {
                 var row = _channelRows[tile];
-                string text = $"#  {tile.Host.Name}";
+                row.Visible = tile.Visible;
+                string text = tile.Host.Name;
                 if (row.Text != text) row.Text = text;
-                var fore = tile.Selected ? DiscordTheme.TextBright
-                         : tile.IsOnline ? DiscordTheme.TextNormal : DiscordTheme.TextMuted;
-                var back = tile.Selected ? DiscordTheme.Selected : DiscordTheme.Sidebar;
+                var fore = tile.Selected ? Theme.TextPrimary : tile.IsOnline ? Theme.TextSecondary : Theme.TextMuted;
+                var back = tile.Selected ? Theme.SurfacePressed : Theme.Surface;
                 if (row.ForeColor != fore) row.ForeColor = fore;
                 if (row.BackColor != back) row.BackColor = back;
             }
@@ -268,51 +243,22 @@ internal sealed class MainForm : Form
         finally { _channelList.ResumeLayout(); }
     }
 
-    private void RefreshMemberRows(List<HostTile> ordered)
-    {
-        _memberList.SuspendLayout();
-        try
-        {
-            int needed = ordered.Count + 1; // +1 = ตัวผู้ดูแลระบบเอง
-            while (_memberRows.Count > needed)
-            {
-                var last = _memberRows[^1];
-                _memberRows.RemoveAt(_memberRows.Count - 1);
-                _memberList.Controls.Remove(last);
-                last.Dispose();
-            }
-            while (_memberRows.Count < needed)
-            {
-                var row = CreateMemberLabel();
-                _memberRows.Add(row);
-                _memberList.Controls.Add(row);
-            }
-
-            // เปลี่ยนสถานะออนไลน์ = สลับข้อความ/สีในแถวเดิม จึงไม่ต้องสร้างคอนโทรลใหม่ทุกรอบ
-            SetMemberLabel(_memberRows[0], "ผู้ดูแลระบบ", true);
-            for (int i = 0; i < ordered.Count; i++)
-                SetMemberLabel(_memberRows[i + 1], ordered[i].Host.Name, ordered[i].IsOnline);
-        }
-        finally { _memberList.ResumeLayout(); }
-    }
-
     private Label CreateChannelRow(HostTile tile)
     {
         var row = new Label
         {
-            Width = 210,
-            Height = 30,
-            Text = $"#  {tile.Host.Name}",
-            ForeColor = tile.Selected ? DiscordTheme.TextBright : (tile.IsOnline ? DiscordTheme.TextNormal : DiscordTheme.TextMuted),
-            BackColor = tile.Selected ? DiscordTheme.Selected : DiscordTheme.Sidebar,
-            Font = DiscordTheme.FontMedium,
+            Width = Theme.SidebarWidth - Theme.Space6,
+            Height = Theme.ButtonHeight,
+            Text = tile.Host.Name,
+            Font = Theme.FontBody,
             TextAlign = ContentAlignment.MiddleLeft,
-            Padding = new Padding(8, 0, 0, 0),
+            Padding = new Padding(Theme.Space2, 0, 0, 0),
             Margin = new Padding(0, 1, 0, 1),
             Cursor = Cursors.Hand,
+            AutoEllipsis = true,
         };
-        row.MouseEnter += (_, _) => { if (!tile.Selected) row.BackColor = DiscordTheme.Hover; };
-        row.MouseLeave += (_, _) => { if (!tile.Selected) row.BackColor = DiscordTheme.Sidebar; };
+        row.MouseEnter += (_, _) => { if (!tile.Selected) row.BackColor = Theme.SurfaceHover; };
+        row.MouseLeave += (_, _) => { if (!tile.Selected) row.BackColor = Theme.Surface; };
         row.MouseClick += (_, e) =>
         {
             if (e.Button == MouseButtons.Left)
@@ -323,57 +269,45 @@ internal sealed class MainForm : Form
             }
         };
         row.DoubleClick += (_, _) => OpenRemote(tile);
-
         var menu = new ContextMenuStrip();
+        Theme.StyleMenu(menu);
         menu.Items.Add("ดูกิจกรรม", null, (_, _) => OpenActivity(tile));
         menu.Items.Add("ควบคุมระยะไกล", null, (_, _) => OpenRemote(tile));
         menu.Items.Add("แชท", null, (_, _) => OpenChat(tile));
         row.ContextMenuStrip = menu;
+        row.Disposed += (_, _) => menu.Dispose();
+        row.AccessibleName = tile.Host.Name;
         return row;
-    }
-
-    private static Label CreateMemberLabel() => new()
-    {
-        Width = 196,
-        Height = 28,
-        BackColor = DiscordTheme.Sidebar,
-        Font = DiscordTheme.FontUi,
-        TextAlign = ContentAlignment.MiddleLeft,
-        Padding = new Padding(6, 0, 0, 0),
-        Margin = new Padding(0, 1, 0, 1),
-    };
-
-    private static void SetMemberLabel(Label row, string name, bool online)
-    {
-        string text = "●  " + name;
-        if (row.Text != text) row.Text = text;
-        var fore = online ? DiscordTheme.TextNormal : DiscordTheme.TextMuted;
-        if (row.ForeColor != fore) row.ForeColor = fore;
     }
 
     private void AddTile(HostEntry host)
     {
         var tile = new HostTile(host, _settings, _key, _pki);
         tile.OpenRemoteRequested += (_, _) => OpenRemote(tile);
+        tile.LockRequested += (_, _) => { foreach (var t in _tiles) t.Selected = t == tile; LockTargets(); };
+        tile.ChatRequested += (_, _) => OpenChat(tile);
         tile.ChatReceived += OnChatReceived;
         tile.VoiceReceived += OnVoiceReceived;
         tile.AlertReceived += OnAlertReceived;
-
-        // ส่งรายการบล็อกที่เคยตั้งไว้ของเครื่องนี้ (จะถูกส่งเมื่อเชื่อมต่อ)
         if (_settings.Blocklists.TryGetValue(host.Name, out var rules))
             tile.SetBlocklist(rules);
-
         var menu = new ContextMenuStrip();
+        Theme.StyleMenu(menu);
         menu.Items.Add("แชท", null, (_, _) => OpenChat(tile));
         menu.Items.Add("ควบคุมระยะไกล", null, (_, _) => OpenRemote(tile));
         menu.Items.Add("ดูกิจกรรม", null, (_, _) => OpenActivity(tile));
-        foreach (Control c in tile.Controls) c.ContextMenuStrip = menu;
+        void AssignMenu(Control c)
+        {
+            c.ContextMenuStrip = menu;
+            foreach (Control child in c.Controls) AssignMenu(child);
+        }
+        AssignMenu(tile);
+        tile.Disposed += (_, _) => menu.Dispose();
         _tiles.Add(tile);
         _panel.Controls.Add(tile);
         tile.Start();
+        ApplyFilter();
     }
-
-    // ---------- จัดการรายชื่อเครื่อง ----------
 
     private void AddHost()
     {
@@ -381,7 +315,6 @@ internal sealed class MainForm : Form
             ("ชื่อเครื่อง:", $"PC-{_tiles.Count + 1:00}"),
             ("IP / ชื่อโฮสต์:", "192.168.1."));
         if (values is null || string.IsNullOrWhiteSpace(values[1])) return;
-
         var host = new HostEntry { Name = values[0], Address = values[1] };
         _settings.Hosts.Add(host);
         _settings.IgnoredMachines.RemoveAll(n => n.Equals(host.Name, StringComparison.OrdinalIgnoreCase));
@@ -392,24 +325,20 @@ internal sealed class MainForm : Form
     private void RemoveSelected()
     {
         var selected = _tiles.Where(t => t.Selected).ToList();
-        if (selected.Count == 0)
-        {
-            _status.Text = "กรุณาเลือกเครื่องที่จะลบก่อน";
-            return;
-        }
-        if (!Confirm($"ลบ {selected.Count} เครื่องออกจากรายการ?")) return;
-
+        if (selected.Count == 0) { _status.Text = "กรุณาเลือกเครื่องที่จะลบก่อน"; return; }
+        if (!UiDialog.Confirm(this, "ลบเครื่อง", $"ลบ {selected.Count} เครื่องออกจากรายการ?", "ลบ", danger: true)) return;
         foreach (var tile in selected)
         {
             _settings.Hosts.Remove(tile.Host);
             if (!_settings.IgnoredMachines.Contains(tile.Host.Name, StringComparer.OrdinalIgnoreCase))
-                _settings.IgnoredMachines.Add(tile.Host.Name); // กันไม่ให้การค้นหาอัตโนมัติเพิ่มกลับมา
+                _settings.IgnoredMachines.Add(tile.Host.Name);
             _tiles.Remove(tile);
             _panel.Controls.Remove(tile);
             if (_chats.Remove(tile, out var chat)) chat.ForceClose();
             tile.Dispose();
         }
         _settings.Save();
+        ApplyFilter();
     }
 
     private void ToggleSelectAll()
@@ -609,6 +538,8 @@ internal sealed class MainForm : Form
     {
         var values = Prompt.Show(this, "ล็อกหน้าจอ", ("ข้อความบนหน้าจอ:", "เครื่องนี้ถูกล็อกโดยผู้ดูแลระบบ"));
         if (values is null) return;
+        int count = Targets().Count;
+        if (count > 1 && !Confirm("ล็อกหน้าจอ", count)) return;
         Broadcast(c => c.SendJson(MsgType.Lock, new LockCmd(values[0])));
     }
 
@@ -634,7 +565,7 @@ internal sealed class MainForm : Form
     private void Power(PowerAction action, string label)
     {
         int count = Targets().Count;
-        if (!Confirm($"ยืนยัน{label} {count} เครื่อง?")) return;
+        if (!Confirm(label, count)) return;
         Broadcast(c => c.SendJson(MsgType.PowerAction, new PowerCmd(action)));
     }
 
@@ -650,7 +581,7 @@ internal sealed class MainForm : Form
         if (!_settings.AlertsEnabled) return;
 
         string title = $"{tile.Host.Name} — {msg.Kind}";
-        _status.Text = $"🔔 {title}: {msg.Text}  ({msg.Time:HH:mm:ss})";
+        _status.Text = $"{title}: {msg.Text}  ({msg.Time:HH:mm:ss})";
         ShowToast(title, msg.Text, msg.Kind);
         try { _tray.ShowBalloonTip(5000, title, msg.Text, ToolTipIcon.Warning); }
         catch (Exception ex)
@@ -662,9 +593,9 @@ internal sealed class MainForm : Form
 
     private void ShowToast(string title, string text, string kind)
     {
-        var accent = kind.Contains("USB") || kind.Contains("ส่งออก") ? Color.FromArgb(240, 178, 50)
-                   : kind.Contains("บล็อก") ? Color.FromArgb(237, 66, 69)
-                   : DiscordTheme.Blurple;
+        var accent = kind.Contains("USB") || kind.Contains("ส่งออก") ? Theme.Waiting
+                   : kind.Contains("บล็อก") ? Theme.Danger
+                   : Theme.AccentHover;
         var toast = new ToastForm(title, text, accent);
         toast.FormClosed += (_, _) => { _toasts.Remove(toast); RepositionToasts(); };
         _toasts.Insert(0, toast);
@@ -675,11 +606,11 @@ internal sealed class MainForm : Form
     private void RepositionToasts()
     {
         var wa = Screen.FromControl(this).WorkingArea;
-        int y = wa.Bottom - 16;
+        int y = wa.Bottom - Theme.ToastMargin;
         foreach (var t in _toasts)
         {
-            y -= t.Height + 8;
-            t.Location = new Point(wa.Right - t.Width - 16, y);
+            y -= t.Height + Theme.ToastGap;
+            t.Location = new Point(wa.Right - t.Width - Theme.ToastMargin, y);
         }
     }
 
@@ -695,7 +626,7 @@ internal sealed class MainForm : Form
         string text = _alertLog.Count == 0
             ? "ยังไม่มีการแจ้งเตือน"
             : string.Join("\n", _alertLog.Take(50).Select(a => $"[{a.Time:HH:mm:ss}] {a.Kind}: {a.Text}"));
-        MessageBox.Show(text, "การแจ้งเตือนล่าสุด", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        UiDialog.Show(this, "การแจ้งเตือนล่าสุด", text);
     }
 
     // ---------- บล็อกโปรแกรม / เว็บ ----------
@@ -770,15 +701,15 @@ internal sealed class MainForm : Form
             _settings.Save();
         }
 
-        var answer = MessageBox.Show(this,
+        var answer = UiDialog.Confirm(this, "กุญแจยืนยันตัวตน",
             $"ลายนิ้วมือกุญแจของ Master:  {_key.Fingerprint}\n" +
             "(ต้องตรงกับที่เครื่องลูกแสดง: คลิกขวาไอคอนโล่ → สถานะการเชื่อมต่อ)\n\n" +
             "ตั้งแต่ C2a การติดตั้ง Agent ใช้ enrollment bundle (.rdrop) ที่มีรหัสผ่าน แทน master-public.pem\n" +
             "เมนู เพิ่มเติม → ส่งออก enrollment bundle สำหรับเครื่องใหม่\n\n" +
             "CA public: " + MasterPki.CaPublicPath + "\n" +
             "กุญแจลับ CA/Master เข้ารหัส DPAPI CurrentUser ในโฟลเดอร์นี้ ห้ามลบหรือย้าย\n\nเปิดโฟลเดอร์เลยไหม?",
-            "กุญแจยืนยันตัวตน", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-        if (answer == DialogResult.Yes)
+            "เปิดโฟลเดอร์");
+        if (answer)
             Process.Start("explorer.exe", $"/select,\"{MasterPki.CaPublicPath}\"");
     }
 
@@ -798,19 +729,18 @@ internal sealed class MainForm : Form
             byte[] bundle = _pki.ExportEnrollment(values[0], values[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                 secret[0], File.ReadAllText(MasterKey.PublicPath));
             File.WriteAllBytes(dialog.FileName, bundle);
-            MessageBox.Show(this, "ส่งออกแล้ว: " + dialog.FileName + "\nใช้ไฟล์นี้ตอนติดตั้ง Agent แทน master-public.pem\nรหัส bundle ใช้ครั้งเดียวตอนติดตั้ง ไม่ถูกเก็บในไฟล์",
-                "Enrollment", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            UiDialog.Show(this, "Enrollment", "ส่งออกแล้ว: " + dialog.FileName + "\nใช้ไฟล์นี้ตอนติดตั้ง Agent แทน master-public.pem\nรหัส bundle ใช้ครั้งเดียวตอนติดตั้ง ไม่ถูกเก็บในไฟล์");
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "ส่งออกไม่สำเร็จ", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            UiDialog.Show(this, "ส่งออกไม่สำเร็จ", ex.Message, DialogKind.Error);
         }
     }
 
     private void RevokeSelected()
     {
         var targets = Targets();
-        if (targets.Count == 0 || !Confirm($"เพิกถอนใบรับรอง {targets.Count} เครื่อง? ต้อง enroll ใหม่ก่อนใช้งานต่อ")) return;
+        if (targets.Count == 0 || !Confirm("เพิกถอนใบรับรอง ต้อง enroll ใหม่ก่อนใช้งานต่อ", targets.Count)) return;
         foreach (var tile in targets)
         {
             try
@@ -822,7 +752,7 @@ internal sealed class MainForm : Form
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, tile.Host.Name + ": " + ex.Message, "เพิกถอนไม่สำเร็จ", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UiDialog.Show(this, "เพิกถอนไม่สำเร็จ", tile.Host.Name + ": " + ex.Message, DialogKind.Error);
             }
         }
     }
@@ -830,12 +760,12 @@ internal sealed class MainForm : Form
     private void VerifyAudit()
     {
         var result = AuditLog.Verify(MasterPki.AuditFolder);
-        MessageBox.Show(this, result.Valid ? $"audit ถูกต้อง ({result.Records} รายการ)" : "audit ไม่ถูกต้อง: " + result.Error,
-            "Audit", MessageBoxButtons.OK, result.Valid ? MessageBoxIcon.Information : MessageBoxIcon.Error);
+        UiDialog.Show(this, "Audit", result.Valid ? $"audit ถูกต้อง ({result.Records} รายการ)" : "audit ไม่ถูกต้อง: " + result.Error,
+            result.Valid ? DialogKind.Info : DialogKind.Error);
     }
 
-    private bool Confirm(string text) =>
-        MessageBox.Show(this, text, "ยืนยัน", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+    private bool Confirm(string text, int count) =>
+        UiDialog.Confirm(this, "ยืนยันคำสั่ง", $"{text}\nจะกระทบ {count} เครื่อง", "ยืนยัน", danger: true);
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {

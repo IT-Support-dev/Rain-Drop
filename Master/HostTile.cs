@@ -3,14 +3,16 @@ using RainDrop.Shared;
 namespace RainDrop.Master;
 
 /// <summary>
-/// กรอบแสดงภาพหน้าจอย่อของเครื่องลูก 1 เครื่อง
-/// วนขอภาพทุก 1 วินาที และเชื่อมต่อใหม่อัตโนมัติเมื่อหลุด
-/// คลิก = เลือก/ยกเลิกเลือก, ดับเบิลคลิก = เปิดหน้าต่างควบคุม
+/// การ์ดเครื่องลูก 1 เครื่อง: ชื่อ สถานะ IP และภาพย่อ
+/// ตรรกะเชื่อมต่อ/ดึงภาพเหมือนเดิม; ปุ่มลัดแสดงเมื่อชี้เมาส์
 /// </summary>
 internal sealed class HostTile : UserControl
 {
     private readonly PictureBox _pic;
-    private readonly Label _label;
+    private readonly Label _name;
+    private readonly Label _address;
+    private readonly StatusBadge _badge;
+    private readonly FlowLayoutPanel _shortcuts;
     private readonly MasterSettings _settings;
     private readonly MasterKey _key;
     private readonly MasterPki _pki;
@@ -21,56 +23,39 @@ internal sealed class HostTile : UserControl
 
     public HostEntry Host { get; }
     public event EventHandler? OpenRemoteRequested;
-
-    /// <summary>มีข้อความแชทจากเครื่องนี้ (เรียกบน UI thread แล้ว)</summary>
+    public event EventHandler? LockRequested;
+    public event EventHandler? ChatRequested;
     public event Action<HostTile, ChatMsg>? ChatReceived;
-
-    /// <summary>มีข้อความเสียงจากเครื่องนี้ (เรียกบน UI thread แล้ว)</summary>
     public event Action<HostTile, VoiceMsg>? VoiceReceived;
-
-    /// <summary>มีการแจ้งเตือนจากเครื่องนี้ (USB/ไฟล์/บล็อก) (เรียกบน UI thread แล้ว)</summary>
     public event Action<HostTile, AlertMsg>? AlertReceived;
 
     private BlockRules? _blocklist;
 
-    /// <summary>ตั้งรายการบล็อกของเครื่องนี้ ส่งทันทีถ้าออนไลน์ และส่งซ้ำทุกครั้งที่เชื่อมต่อใหม่</summary>
     public void SetBlocklist(BlockRules rules)
     {
         _blocklist = rules;
         _client?.SendBlocklist(rules);
     }
 
-    /// <summary>คืนค่าเฉพาะเมื่อออนไลน์อยู่</summary>
     public AgentClient? Client => _client is { IsConnected: true } c ? c : null;
-
-    /// <summary>เครื่องนี้ออนไลน์อยู่หรือไม่ (ใช้โดยแถบช่อง/รายชื่อแบบ Discord)</summary>
     public bool IsOnline { get; private set; }
 
     public bool Selected
     {
         get => _selected;
-        set
-        {
-            _selected = value;
-            UpdateBorder();
-        }
+        set { _selected = value; UpdateBorder(); }
     }
 
-    /// <summary>มีข้อความแชทที่ยังไม่ได้อ่าน: กรอบจะเป็นสีส้ม</summary>
     public bool HasUnread
     {
         get => _hasUnread;
-        set
-        {
-            _hasUnread = value;
-            UpdateBorder();
-        }
+        set { _hasUnread = value; UpdateBorder(); }
     }
 
     private void UpdateBorder() => BackColor =
-        _hasUnread ? Color.FromArgb(240, 178, 50) :
-        _selected ? DiscordTheme.Blurple :
-        Color.FromArgb(43, 45, 49);
+        _hasUnread ? Theme.Waiting :
+        _selected ? Theme.AccentHover :
+        Theme.Border;
 
     public HostTile(HostEntry host, MasterSettings settings, MasterKey key, MasterPki pki)
     {
@@ -79,34 +64,78 @@ internal sealed class HostTile : UserControl
         _key = key;
         _pki = pki;
 
-        Size = new Size(340, 230);
-        Margin = new Padding(6);
-        Padding = new Padding(3);
-        BackColor = Color.FromArgb(43, 45, 49);
+        Size = new Size(Theme.CardWidth, Theme.CardHeight);
+        Margin = new Padding(Theme.Space2);
+        Padding = new Padding(Theme.Space1);
+        BackColor = Theme.Border;
+        DoubleBuffered = true;
 
-        _pic = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(24, 25, 28) };
-        _label = new Label
+        var surface = new UiCard { Dock = DockStyle.Fill, Padding = new Padding(Theme.Space2) };
+        _pic = new UiPictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
+        _name = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = Theme.Space5,
+            Text = host.Name,
+            Font = Theme.FontBodyStrong,
+            ForeColor = Theme.TextPrimary,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+        };
+        _address = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = Theme.Space4,
+            Text = host.Address,
+            Font = Theme.FontCaption,
+            ForeColor = Theme.TextMuted,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+        };
+        _badge = new StatusBadge(StatusKind.Waiting, "รอเชื่อมต่อ") { Dock = DockStyle.Top, Margin = new Padding(0, Theme.Space1, 0, Theme.Space1) };
+        _shortcuts = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = 24,
-            TextAlign = ContentAlignment.MiddleLeft,
-            BackColor = Color.FromArgb(30, 31, 34),
-            ForeColor = Color.FromArgb(148, 155, 164),
+            Height = Theme.ButtonHeight + Theme.Space2,
+            FlowDirection = FlowDirection.RightToLeft,
+            BackColor = Theme.Surface,
+            Visible = false,
         };
-        Controls.Add(_pic);
-        Controls.Add(_label);
+        var chat = new UiButton("", ButtonKind.Ghost, UiIcon.Chat) { Width = Theme.ButtonHeight };
+        Theme.SetToolTip(chat, "แชท");
+        chat.Click += (_, _) => ChatRequested?.Invoke(this, EventArgs.Empty);
+        var remote = new UiButton("", ButtonKind.Ghost, UiIcon.Monitor) { Width = Theme.ButtonHeight };
+        Theme.SetToolTip(remote, "ควบคุมระยะไกล");
+        remote.Click += (_, _) => OpenRemoteRequested?.Invoke(this, EventArgs.Empty);
+        var lockBtn = new UiButton("", ButtonKind.Ghost, UiIcon.Lock) { Width = Theme.ButtonHeight };
+        Theme.SetToolTip(lockBtn, "ล็อกหน้าจอ");
+        lockBtn.Click += (_, _) => LockRequested?.Invoke(this, EventArgs.Empty);
+        _shortcuts.Controls.Add(chat);
+        _shortcuts.Controls.Add(remote);
+        _shortcuts.Controls.Add(lockBtn);
 
-        // เลือกด้วยปุ่มซ้ายเท่านั้น (ปุ่มขวาใช้เปิดเมนูแชท)
-        _pic.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) Selected = !Selected; };
-        _label.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) Selected = !Selected; };
+        surface.Controls.Add(_pic);
+        surface.Controls.Add(_shortcuts);
+        surface.Controls.Add(_badge);
+        surface.Controls.Add(_address);
+        surface.Controls.Add(_name);
+        Controls.Add(surface);
+
+        void Select(object? s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Selected = !Selected; }
+        _pic.MouseClick += Select;
+        _name.MouseClick += Select;
         _pic.DoubleClick += (_, _) => OpenRemoteRequested?.Invoke(this, EventArgs.Empty);
-
-        SetStatus("รอเชื่อมต่อ", Color.Gold);
+        void Hover(Control c)
+        {
+            c.MouseEnter += (_, _) => _shortcuts.Visible = true;
+            c.MouseLeave += (_, _) => { if (!ClientRectangle.Contains(PointToClient(Cursor.Position))) _shortcuts.Visible = false; };
+            foreach (Control child in c.Controls) Hover(child);
+        }
+        Hover(this);
+        AccessibleName = $"เครื่อง {host.Name}";
     }
 
     public void Start() => _ = PollLoopAsync();
-
-    /// <summary>ตัดการเชื่อมต่อปัจจุบัน ลูปจะเชื่อมต่อใหม่เองด้วยค่าตั้งล่าสุด</summary>
     public void Reconnect() => _client?.Dispose();
 
     private async Task PollLoopAsync()
@@ -120,7 +149,7 @@ internal sealed class HostTile : UserControl
                 {
                     _client?.Dispose();
                     _client = null;
-                    SetStatus("กำลังเชื่อมต่อ...", Color.Gold);
+                    SetStatus("กำลังเชื่อมต่อ", StatusKind.Waiting);
                     var (host, port) = Host.Resolve(_settings.Port);
                     _client = await AgentClient.ConnectAsync(host, port, _key, _pki, Host.Name, token);
                     _client.ChatReceived += msg =>
@@ -138,7 +167,6 @@ internal sealed class HostTile : UserControl
                         if (IsHandleCreated && !IsDisposed)
                             BeginInvoke(() => AlertReceived?.Invoke(this, msg));
                     };
-                    // ส่งรายการบล็อกที่ตั้งไว้ซ้ำทุกครั้งที่เชื่อมต่อใหม่
                     if (_blocklist is not null) _client.SendBlocklist(_blocklist);
                 }
 
@@ -147,7 +175,7 @@ internal sealed class HostTile : UserControl
                 _pic.Image = bmp;
                 old?.Dispose();
                 IsOnline = true;
-                SetStatus("ออนไลน์", DiscordTheme.Online);
+                SetStatus("ออนไลน์", StatusKind.Online);
 
                 await Task.Delay(1000, token);
             }
@@ -160,17 +188,18 @@ internal sealed class HostTile : UserControl
                 _client?.Dispose();
                 _client = null;
                 IsOnline = false;
-                SetStatus("ออฟไลน์ - " + ex.Message, Color.FromArgb(237, 66, 69));
-                try { await Task.Delay(3000, token); } catch { break; }
+                SetStatus("ออฟไลน์", StatusKind.Error);
+                Theme.SetToolTip(_badge, ex.Message);
+                try { await Task.Delay(3000, token); }
+                catch (OperationCanceledException) { break; }
             }
         }
     }
 
-    private void SetStatus(string status, Color color)
+    private void SetStatus(string status, StatusKind kind)
     {
         if (IsDisposed) return;
-        _label.ForeColor = color;
-        _label.Text = $" ● {Host.Name} ({Host.Address})  {status}";
+        _badge.Set(kind, status);
     }
 
     protected override void Dispose(bool disposing)

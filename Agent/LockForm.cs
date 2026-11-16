@@ -13,29 +13,70 @@ namespace RainDrop.Agent;
 internal sealed class LockForm : Form
 {
     private readonly Label _label;
+    private readonly Label _clock;
+    private readonly PictureBox _logo;
     private readonly System.Windows.Forms.Timer _keepOnTop;
-    private LowLevelKeyboardProc? _hookProc; // เก็บอ้างอิงไว้กัน GC เก็บ delegate
+    private readonly System.Windows.Forms.Timer _clockTimer;
+    private LowLevelKeyboardProc? _hookProc;
     private IntPtr _hook;
     private bool _allowClose;
 
     public LockForm(string text)
     {
+        DoubleBuffered = true;
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         Bounds = SystemInformation.VirtualScreen;
         TopMost = true;
         ShowInTaskbar = false;
-        BackColor = Color.FromArgb(18, 24, 38);
+        BackColor = Theme.Background;
+        Font = Theme.FontBody;
 
-        _label = new Label
+        var center = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ForeColor = Color.White,
-            Font = DiscordTheme.FontLockScreen,
-            TextAlign = ContentAlignment.MiddleCenter,
-            Text = text,
+            ColumnCount = 1,
+            RowCount = 5,
+            BackColor = Theme.Background,
+            Padding = new Padding(Theme.Space6),
         };
-        Controls.Add(_label);
+        center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+
+        _logo = new PictureBox
+        {
+            Image = AppIcon.Load().ToBitmap(),
+            Size = new Size(Theme.Space6 * 2, Theme.Space6 * 2),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Anchor = AnchorStyles.None,
+            Margin = new Padding(0, 0, 0, Theme.Space5),
+        };
+        _clock = new Label
+        {
+            AutoSize = true,
+            Anchor = AnchorStyles.None,
+            ForeColor = Theme.TextPrimary,
+            Font = Theme.FontClock,
+            Text = DateTime.Now.ToString("HH:mm"),
+            Margin = new Padding(0, 0, 0, Theme.Space3),
+        };
+        _label = new Label
+        {
+            AutoSize = true,
+            Anchor = AnchorStyles.None,
+            ForeColor = Theme.TextSecondary,
+            Font = Theme.FontLockMessage,
+            Text = text,
+            MaximumSize = new Size(SystemInformation.VirtualScreen.Width - Theme.Space6 * 2, 0),
+            TextAlign = ContentAlignment.MiddleCenter,
+        };
+        center.Controls.Add(_logo, 0, 1);
+        center.Controls.Add(_clock, 0, 2);
+        center.Controls.Add(_label, 0, 3);
+        Controls.Add(center);
 
         _keepOnTop = new System.Windows.Forms.Timer { Interval = 500 };
         _keepOnTop.Tick += (_, _) =>
@@ -43,6 +84,8 @@ internal sealed class LockForm : Form
             TopMost = true;
             Activate();
         };
+        _clockTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        _clockTimer.Tick += (_, _) => _clock.Text = DateTime.Now.ToString("HH:mm");
     }
 
     public void SetText(string text) => _label.Text = text;
@@ -59,6 +102,7 @@ internal sealed class LockForm : Form
         _hookProc = HookCallback;
         _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _hookProc, GetModuleHandle(null), 0);
         _keepOnTop.Start();
+        _clockTimer.Start();
         Activate();
     }
 
@@ -68,14 +112,13 @@ internal sealed class LockForm : Form
         {
             var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
             bool injected = (info.flags & LLKHF_INJECTED) != 0;
-            if (!injected) return (IntPtr)1; // กลืนปุ่มที่ผู้ใช้กดจริงทั้งหมด
+            if (!injected) return (IntPtr)1;
         }
         return CallNextHookEx(_hook, nCode, wParam, lParam);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        // ปล่อยให้ปิดได้เฉพาะเมื่อ Master สั่งปลดล็อก หรือ Windows กำลังปิดเครื่อง
         if (!_allowClose && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
@@ -88,6 +131,9 @@ internal sealed class LockForm : Form
     {
         _keepOnTop.Stop();
         _keepOnTop.Dispose();
+        _clockTimer.Stop();
+        _clockTimer.Dispose();
+        _logo.Image?.Dispose();
         if (_hook != IntPtr.Zero)
         {
             UnhookWindowsHookEx(_hook);

@@ -1,6 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using RainDrop.Shared;
 
 namespace RainDrop.Agent;
 
@@ -25,9 +26,9 @@ internal static class ScreenCapture
             catch
             {
                 // เกิดได้ตอนหน้าจอ UAC / Ctrl+Alt+Del / Lock screen (secure desktop)
-                g.Clear(Color.Black);
-                using var font = new Font("Tahoma", 28);
-                g.DrawString("Secure desktop / หน้าจอถูกล็อกโดย Windows", font, Brushes.White, 40, 40);
+                g.Clear(Theme.Background);
+                g.DrawString("Secure desktop / หน้าจอถูกล็อกโดย Windows", Theme.FontSecureDesktop,
+                    Theme.Brush(Theme.TextPrimary), Theme.Space6 + Theme.Space2, Theme.Space6 + Theme.Space2);
             }
         }
 

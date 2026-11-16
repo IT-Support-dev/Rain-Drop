@@ -2,63 +2,70 @@ using RainDrop.Shared;
 
 namespace RainDrop.Master;
 
-/// <summary>
-/// แจ้งเตือนเด้งมุมขวาล่างแบบ Discord หายเองใน 6 วินาที คลิกเพื่อปิด
-/// </summary>
+/// <summary>การ์ดแจ้งเตือนมุมขวาล่าง หายเองใน 6 วินาที คลิกเพื่อปิด ไม่แย่งโฟกัส</summary>
 internal sealed class ToastForm : Form
 {
     private readonly System.Windows.Forms.Timer _life = new() { Interval = 6000 };
 
     public ToastForm(string title, string text, Color accent)
     {
+        DoubleBuffered = true;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
-        Size = new Size(340, 76);
-        BackColor = DiscordTheme.Sidebar;
+        Size = new Size(Theme.ToastWidth, Theme.ToastHeight);
+        BackColor = Theme.Surface;
+        Font = Theme.FontBody;
+        Padding = new Padding(Theme.Space3);
 
-        var bar = new Panel { Dock = DockStyle.Left, Width = 5, BackColor = accent };
+        var icon = new PictureBox
+        {
+            Dock = DockStyle.Left,
+            Width = Theme.IconSizeLarge,
+            Image = UiIcons.Get(UiIcon.Bell, accent, Theme.IconSizeLarge),
+            SizeMode = PictureBoxSizeMode.Zoom,
+        };
         var titleLabel = new Label
         {
             Dock = DockStyle.Top,
-            Height = 26,
-            Text = "🔔  " + title,
-            ForeColor = Color.White,
-            Font = DiscordTheme.FontMediumBold,
-            Padding = new Padding(10, 6, 8, 0),
+            Height = Theme.Space5,
+            Text = title,
+            ForeColor = Theme.TextPrimary,
+            Font = Theme.FontBodyStrong,
+            AutoEllipsis = true,
         };
         var textLabel = new Label
         {
             Dock = DockStyle.Fill,
             Text = text,
-            ForeColor = DiscordTheme.TextNormal,
-            Font = DiscordTheme.FontUi,
-            Padding = new Padding(12, 0, 8, 6),
+            ForeColor = Theme.TextSecondary,
+            Font = Theme.FontSmall,
             AutoEllipsis = true,
         };
-
         Controls.Add(textLabel);
         Controls.Add(titleLabel);
-        Controls.Add(bar);
-
-        foreach (Control c in new Control[] { this, bar, titleLabel, textLabel })
+        Controls.Add(icon);
+        foreach (Control c in new Control[] { this, icon, titleLabel, textLabel })
             c.Click += (_, _) => Close();
-
+        AccessibleName = title;
         _life.Tick += (_, _) => { _life.Stop(); Close(); };
     }
 
-    protected override bool ShowWithoutActivation => true; // ไม่แย่งโฟกัสหน้าต่างอื่น
+    protected override bool ShowWithoutActivation => true;
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        using var path = Theme.RoundedRect(new Rectangle(0, 0, Width, Height), Theme.RadiusMedium);
+        Region = new Region(path);
         _life.Start();
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _life.Dispose();
+        Region = null;
         base.OnFormClosed(e);
     }
 }

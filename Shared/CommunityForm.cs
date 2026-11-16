@@ -15,15 +15,15 @@ public sealed class CommunityForm : Form
     private readonly VoiceChat _voice;
     private readonly string _myName;
 
-    private readonly ListBox _textList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
-    private readonly ListBox _voiceList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
-    private readonly ListBox _memberList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
-    private readonly FlowLayoutPanel _messages = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Color.White, Padding = new Padding(6) };
-    private readonly Label _channelTitle = new() { Dock = DockStyle.Top, Height = 32, Font = DiscordTheme.FontHeaderBold, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0), BackColor = Color.FromArgb(240, 242, 245) };
-    private readonly TextBox _input = new() { Dock = DockStyle.Fill, Multiline = true };
-    private readonly Button _voiceButton = new() { Dock = DockStyle.Top, Height = 34, Text = "เข้าร่วมห้องเสียงที่เลือก", Enabled = false };
-    private readonly Button _muteButton = new() { Dock = DockStyle.Top, Height = 28, Text = "ปิดไมค์", Visible = false };
-    private readonly Label _status = new() { Dock = DockStyle.Bottom, Height = 22, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(6, 0, 0, 0), ForeColor = Color.DimGray };
+    private readonly ListBox _textList = new UiListBox() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
+    private readonly ListBox _voiceList = new UiListBox() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
+    private readonly ListBox _memberList = new UiListBox() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None };
+    private readonly UiFlowPanel _messages = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Theme.Background, Padding = new Padding(Theme.Space3) };
+    private readonly Label _channelTitle = new() { Dock = DockStyle.Top, Height = Theme.ToolbarHeight, Font = Theme.FontTitle, ForeColor = Theme.TextPrimary, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(Theme.Space3, 0, 0, 0), BackColor = Theme.Surface };
+    private readonly TextBox _input = UiInput.Create("", multiline: true);
+    private readonly UiButton _voiceButton = new("เข้าร่วมห้องเสียง", ButtonKind.Secondary, UiIcon.Mic) { Dock = DockStyle.Top, Enabled = false };
+    private readonly UiButton _muteButton = new("ปิดไมค์", ButtonKind.Ghost, UiIcon.Mic) { Dock = DockStyle.Top, Visible = false };
+    private readonly Label _status = new() { Dock = DockStyle.Bottom, Height = Theme.StatusHeight, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(Theme.Space3, 0, 0, 0), ForeColor = Theme.TextMuted, BackColor = Theme.Surface, Font = Theme.FontCaption };
 
     private readonly List<ChannelInfo> _channels = new();
     private readonly Dictionary<string, List<ChatPost>> _byChannel = new();
@@ -44,10 +44,8 @@ public sealed class CommunityForm : Form
         _voice = new VoiceChat(pcm => _hub.SendVoice(pcm));
 
         Text = "Rain Drop - ชุมชน";
-        Size = new Size(1040, 680);
-        StartPosition = FormStartPosition.CenterScreen;
-        Font = DiscordTheme.FontMedium;
-        Icon = AppIcon.Load();
+        Theme.ConfigureForm(this, new Size(760, 520));
+        UiWindowPlacement.Attach(this, "community", new Size(1040, 680), new Size(760, 520));
 
         BuildLayout();
         WireHub();
@@ -60,21 +58,25 @@ public sealed class CommunityForm : Form
 
     private void BuildLayout()
     {
+        Theme.StyleList(_textList);
+        Theme.StyleList(_voiceList);
+        Theme.StyleList(_memberList);
+        _input.Dock = DockStyle.Fill;
         // ----- ซ้าย: ช่อง + สมาชิก (แผงกว้างคงที่ หลีกเลี่ยงปัญหา SplitterDistance ของ SplitContainer) -----
-        var left = new TableLayoutPanel { Dock = DockStyle.Left, Width = 240, ColumnCount = 1, RowCount = 7, BackColor = Color.FromArgb(246, 247, 249) };
-        left.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        var left = new TableLayoutPanel { Dock = DockStyle.Left, Width = Theme.SidebarWidth, ColumnCount = 1, RowCount = 7, BackColor = Theme.Surface, Padding = new Padding(Theme.Space2) };
+        left.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Space5));
         left.RowStyles.Add(new RowStyle(SizeType.Percent, 32));
-        left.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        left.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Space5));
         left.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
-        left.RowStyles.Add(new RowStyle(SizeType.Absolute, 62)); // ปุ่มเสียง
-        left.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        left.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.ButtonHeight * 2 + Theme.Space2));
+        left.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Space5));
         left.RowStyles.Add(new RowStyle(SizeType.Percent, 44));
 
         left.Controls.Add(Header("# ช่องข้อความ"), 0, 0);
         left.Controls.Add(_textList, 0, 1);
-        left.Controls.Add(Header("🔊 ช่องเสียง"), 0, 2);
+        left.Controls.Add(Header("ช่องเสียง"), 0, 2);
         left.Controls.Add(_voiceList, 0, 3);
-        var voiceButtons = new Panel { Dock = DockStyle.Fill };
+        var voiceButtons = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
         voiceButtons.Controls.Add(_muteButton);
         voiceButtons.Controls.Add(_voiceButton);
         left.Controls.Add(voiceButtons, 0, 4);
@@ -84,9 +86,9 @@ public sealed class CommunityForm : Form
         // ----- ขวา: แชท -----
         var right = new Panel { Dock = DockStyle.Fill };
 
-        var inputBar = new Panel { Dock = DockStyle.Bottom, Height = 64, Padding = new Padding(6) };
-        var send = new Button { Dock = DockStyle.Right, Width = 72, Text = "ส่ง" };
-        var attach = new Button { Dock = DockStyle.Right, Width = 90, Text = "แนบไฟล์" };
+        var inputBar = new Panel { Dock = DockStyle.Bottom, Height = Theme.ButtonHeightLarge * 2, Padding = new Padding(Theme.Space3), BackColor = Theme.Surface };
+        var send = new UiButton("ส่ง", ButtonKind.Primary, UiIcon.Send) { Dock = DockStyle.Right, Width = Theme.DialogButtonWidth };
+        var attach = new UiButton("แนบไฟล์", ButtonKind.Secondary, UiIcon.Attach) { Dock = DockStyle.Right, Width = Theme.DialogButtonWidth };
         inputBar.Controls.Add(_input);
         inputBar.Controls.Add(attach);
         inputBar.Controls.Add(send);
@@ -116,10 +118,10 @@ public sealed class CommunityForm : Form
     {
         Text = text,
         Dock = DockStyle.Fill,
-        Font = DiscordTheme.FontSmallBold,
-        ForeColor = Color.DimGray,
+        Font = Theme.FontCaptionStrong,
+        ForeColor = Theme.TextMuted,
         TextAlign = ContentAlignment.MiddleLeft,
-        Padding = new Padding(8, 0, 0, 0),
+        Padding = new Padding(Theme.Space2, 0, 0, 0),
     };
 
     // ===================== เชื่อม HubClient =====================
@@ -143,7 +145,7 @@ public sealed class CommunityForm : Form
         foreach (var ch in w.Channels)
         {
             if (ch.Kind == ChannelKind.Text) _textList.Items.Add("# " + ch.Name);
-            else _voiceList.Items.Add("🔊 " + ch.Name);
+            else _voiceList.Items.Add(ch.Name);
         }
 
         _byChannel.Clear();
@@ -166,10 +168,10 @@ public sealed class CommunityForm : Form
         foreach (var m in members.OrderByDescending(x => x.Role == MemberRole.Admin).ThenBy(x => x.Name))
         {
             _memberNames[m.Id] = m.Name;
-            string dot = m.State == PresenceState.Online ? "●" : "○";
+            string state = m.State == PresenceState.Online ? "ออนไลน์" : "ออฟไลน์";
             string tag = m.Role == MemberRole.Admin ? " [ผู้ดูแล]" : "";
-            string inVoice = m.VoiceChannelId is not null ? "  🔊" : "";
-            _memberList.Items.Add($"{dot} {m.Name}{tag}{inVoice}");
+            string inVoice = m.VoiceChannelId is not null ? " [เสียง]" : "";
+            _memberList.Items.Add($"{m.Name}{tag}{inVoice} — {state}");
         }
     }
 
@@ -204,8 +206,8 @@ public sealed class CommunityForm : Form
         {
             int count = _voiceRoster.TryGetValue(ch.Id, out var ids) ? ids.Count : 0;
             string names = count > 0 ? "  (" + string.Join(", ", (_voiceRoster[ch.Id]).Select(NameOf)) + ")" : "";
-            string here = ch.Id == _myVoiceChannel ? "✔ " : "";
-            _voiceList.Items.Add($"{here}🔊 {ch.Name}{names}");
+            string here = ch.Id == _myVoiceChannel ? "[อยู่] " : "";
+            _voiceList.Items.Add($"{here}{ch.Name}{names}");
         }
         if (sel >= 0 && sel < _voiceList.Items.Count) _voiceList.SelectedIndex = sel;
         _voiceList.EndUpdate();
@@ -223,7 +225,7 @@ public sealed class CommunityForm : Form
 
         _currentChannel = textChannels[i].Id;
         _channelTitle.Text = "# " + textChannels[i].Name;
-        _messages.Controls.Clear();
+        ClearMessages();
         if (_byChannel.TryGetValue(_currentChannel, out var list))
             foreach (var post in list) AddBubble(post);
     }
@@ -246,26 +248,26 @@ public sealed class CommunityForm : Form
     private void AddBubble(ChatPost post)
     {
         bool mine = post.SenderId == _hub.SelfId;
-        var bubble = new FlowLayoutPanel
+        var bubble = new UiFlowPanel
         {
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            BackColor = mine ? Color.FromArgb(214, 234, 255) : Color.FromArgb(238, 240, 243),
-            Margin = new Padding(mine ? 120 : 4, 3, mine ? 4 : 120, 3),
-            Padding = new Padding(8, 5, 8, 7),
+            BackColor = mine ? Theme.ChatBubbleMine : Theme.ChatBubbleTheirs,
+            Margin = new Padding(mine ? Theme.BubbleIndent : Theme.Space1, Theme.Space1, mine ? Theme.Space1 : Theme.BubbleIndent, Theme.Space1),
+            Padding = new Padding(Theme.Space3, Theme.Space2, Theme.Space3, Theme.Space2),
         };
         bubble.Controls.Add(new Label
         {
             AutoSize = true,
             Text = $"{post.SenderName}   {post.Time:HH:mm}",
-            Font = DiscordTheme.FontTinyBold,
-            ForeColor = mine ? Color.SteelBlue : Color.SeaGreen,
-            Margin = new Padding(0, 0, 0, 3),
+            Font = Theme.FontCaptionStrong,
+            ForeColor = mine ? Theme.TextPrimary : Theme.Online,
+            Margin = new Padding(0, 0, 0, Theme.Space1),
         });
         if (!string.IsNullOrEmpty(post.Text))
-            bubble.Controls.Add(new Label { AutoSize = true, Text = post.Text, MaximumSize = new Size(420, 0), UseMnemonic = false });
+            bubble.Controls.Add(new Label { AutoSize = true, Text = post.Text, ForeColor = Theme.TextPrimary, MaximumSize = new Size(Theme.ChatTextWidth, 0), UseMnemonic = false });
 
         if (post.Attachment is { } att)
         {
@@ -289,7 +291,7 @@ public sealed class CommunityForm : Form
             {
                 using var img = Image.FromFile(path);
                 var thumb = new Bitmap(img); // คัดลอกเพื่อปล่อยไฟล์
-                var pic = new PictureBox { Image = thumb, SizeMode = PictureBoxSizeMode.Zoom, Size = FitSize(thumb.Size, 260, 200), Cursor = Cursors.Hand };
+                var pic = new PictureBox { Image = thumb, SizeMode = PictureBoxSizeMode.Zoom, Size = FitSize(thumb.Size, Theme.AttachmentMaxWidth, Theme.AttachmentMaxHeight), Cursor = Cursors.Hand };
                 pic.Click += (_, _) => OpenFile(path);
                 return pic;
             }
@@ -300,7 +302,7 @@ public sealed class CommunityForm : Form
             }
         }
 
-        var link = new LinkLabel { AutoSize = true, Text = $"📎 {att.FileName} ({Human(att.Size)})" };
+        var link = new LinkLabel { AutoSize = true, Text = $"{att.FileName} ({Human(att.Size)})", LinkColor = Theme.Link, ActiveLinkColor = Theme.TextPrimary, VisitedLinkColor = Theme.Link };
         if (path is not null && File.Exists(path)) link.Click += (_, _) => OpenFile(path);
         else link.Text += "  (กำลังรับ...)";
         link.Tag = att.FileId;
@@ -324,7 +326,7 @@ public sealed class CommunityForm : Form
         var fi = new FileInfo(dialog.FileName);
         if (fi.Length > HubProtocol.MaxFileSize)
         {
-            MessageBox.Show($"ไฟล์ใหญ่เกิน {Human(HubProtocol.MaxFileSize)}", "Rain Drop");
+            UiDialog.Show(this, "Rain Drop", $"ไฟล์ใหญ่เกิน {Human(HubProtocol.MaxFileSize)}", DialogKind.Warning);
             return;
         }
 
@@ -394,14 +396,14 @@ public sealed class CommunityForm : Form
     {
         if (_currentChannel is null) return;
         // เก็บ fileInfo จากข้อความในช่องปัจจุบันไว้ก่อน (เผื่อ announcement มากับไฟล์)
-        if (_byChannel.TryGetValue(_currentChannel, out var list))
-            foreach (var p in list)
+        if (_byChannel.TryGetValue(_currentChannel, out var posts))
+            foreach (var p in posts)
                 if (p.Attachment is { } a && Guid.TryParse(a.FileId, out var gid))
                     _fileInfo[gid] = a;
 
         _messages.SuspendLayout();
-        _messages.Controls.Clear();
-        if (list is not null) foreach (var post in list) AddBubble(post);
+        ClearMessages();
+        if (_byChannel.TryGetValue(_currentChannel, out var current)) foreach (var post in current) AddBubble(post);
         _messages.ResumeLayout();
     }
 
@@ -427,8 +429,8 @@ public sealed class CommunityForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show("เปิดไมโครโฟน/ลำโพงไม่ได้: " + ex.Message +
-                "\n\nตรวจว่ามีอุปกรณ์เสียงและอนุญาตให้แอปใช้ไมโครโฟนแล้ว", "Rain Drop");
+            UiDialog.Show(this, "Rain Drop", "เปิดไมโครโฟน/ลำโพงไม่ได้: " + ex.Message +
+                "\n\nตรวจว่ามีอุปกรณ์เสียงและอนุญาตให้แอปใช้ไมโครโฟนแล้ว", DialogKind.Error);
             return;
         }
 
@@ -460,6 +462,26 @@ public sealed class CommunityForm : Form
     }
 
     // ===================== ตัวช่วย =====================
+
+    private static void DisposeOwnedImages(Control c)
+    {
+        if (c is PictureBox pic)
+        {
+            pic.Image?.Dispose();
+            pic.Image = null;
+        }
+        foreach (Control child in c.Controls) DisposeOwnedImages(child);
+    }
+
+    private void ClearMessages()
+    {
+        foreach (Control c in _messages.Controls.Cast<Control>().ToList())
+        {
+            DisposeOwnedImages(c);
+            c.Dispose();
+        }
+        _messages.Controls.Clear();
+    }
 
     private void UI(Action action)
     {
