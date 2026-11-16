@@ -25,8 +25,7 @@ public class MainFormPreviewTests
         RunOnSTA(() =>
         {
             using var form = new MainForm(new[] { "--ui-preview" });
-            form.CreateControl(); // บังคับให้สร้าง handle และ layout ทั้งหมด
-            form.CreateHandle();  // ยืนยันว่า handle ถูกสร้างแล้ว
+            form.CreateControl(); // บังคับให้สร้าง handle และ layout ทั้งหมด (CreateHandle() เป็น protected เรียกจากภายนอกไม่ได้)
             // การทิ้งฟอร์มต้องไม่โยน exception (รวมถึง ObjectDisposedException ของ ContextMenuStrip)
         });
     }
@@ -40,8 +39,7 @@ public class MainFormPreviewTests
             {
                 using var form = new MainForm(new[] { "--ui-preview" });
                 form.CreateControl();
-                form.CreateHandle();
-                // จำลองการเปิดและปิดหน้าต่างหลายรอบ
+                // จำลองการเปิดและปิดหน้าต่างหลายรอบ (CreateHandle() เป็น protected เรียกจากภายนอกไม่ได้)
                 form.Dispose();
             }
         });
