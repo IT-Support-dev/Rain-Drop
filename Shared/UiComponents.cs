@@ -171,7 +171,7 @@ internal static class UiInput
 {
     internal static TextBox Create(string text = "", bool multiline = false, bool secret = false, string? placeholder = null)
     {
-        var box = new PlaceholderTextBox { Text = text, Multiline = multiline, UseSystemPasswordChar = secret, PlaceholderText = placeholder ?? "" };
+        var box = new PlaceholderTextBox { Text = text, Multiline = multiline, UseSystemPasswordChar = secret, Watermark = placeholder };
         Theme.StyleInput(box);
         if (!multiline) box.Height = Theme.InputHeight;
         return box;
@@ -199,7 +199,7 @@ internal static class UiInput
 
         var box = new PlaceholderTextBox
         {
-            PlaceholderText = placeholder,
+            Watermark = placeholder,
             BorderStyle = BorderStyle.None,
             BackColor = Theme.InputBackground,
             ForeColor = Theme.TextPrimary,
@@ -219,12 +219,14 @@ internal static class UiInput
 
     private sealed class PlaceholderTextBox : TextBox
     {
+        private string? _placeholder;
         private bool _showPlaceholder;
 
-        public override string PlaceholderText
+        /// <summary>ข้อความตัวอย่างที่แสดงเมื่อช่องว่างและไม่มีโฟกัส (แยกจาก TextBox.PlaceholderText ของ .NET เพื่อหลีกเลี่ยงความขัดแย้งเรื่อง nullability)</summary>
+        public string? Watermark
         {
-            get => base.PlaceholderText;
-            set { base.PlaceholderText = value; UpdatePlaceholder(); Invalidate(); }
+            get => _placeholder;
+            set { _placeholder = value; UpdatePlaceholder(); Invalidate(); }
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -254,7 +256,7 @@ internal static class UiInput
 
         private void UpdatePlaceholder()
         {
-            _showPlaceholder = string.IsNullOrEmpty(Text) && !Focused && !string.IsNullOrEmpty(PlaceholderText);
+            _showPlaceholder = string.IsNullOrEmpty(Text) && !Focused && _placeholder is { Length: > 0 };
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -262,7 +264,7 @@ internal static class UiInput
             base.OnPaint(e);
             if (_showPlaceholder)
             {
-                TextRenderer.DrawText(e.Graphics, PlaceholderText, Font,
+                TextRenderer.DrawText(e.Graphics, _placeholder!, Font,
                     new Rectangle(Theme.Space2, 0, Width - Theme.Space4, Height),
                     Theme.PlaceholderText, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
             }
