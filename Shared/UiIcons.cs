@@ -6,7 +6,7 @@ namespace RainDrop.Shared;
 internal enum UiIcon
 {
     None, Plus, Monitor, Lock, Unlock, Activity, Block, Chat, Message, Power, More,
-    Settings, Refresh, Send, Attach, Mic, Play, Warning, Info, Bell
+    Settings, Refresh, Send, Attach, Mic, Play, Warning, Info, Bell, Computer
 }
 
 /// <summary>One stroke family, cached bitmaps. Icons are generated once per icon/color/size.</summary>
@@ -51,6 +51,11 @@ internal static class UiIcons
             case UiIcon.Warning: Poly(P(8, 2), P(15, 14), P(1, 14), P(8, 2)); Line(8, 6, 8, 10); Line(8, 12, 8, 12.5F); break;
             case UiIcon.Info: Circle(2, 2, 12); Line(8, 7, 8, 12); Line(8, 4, 8, 4.5F); break;
             case UiIcon.Bell: g.DrawArc(pen, 4 * s, 2 * s, 8 * s, 9 * s, 180, 180); Line(4, 11, 12, 11); Line(6, 14, 10, 14); break;
+            case UiIcon.Computer:
+                Rect(2, 2, 12, 10);          // จอภาพ
+                Rect(6, 11, 4, 3);            // ขาตั้ง
+                g.DrawArc(pen, 5 * s, 14 * s, 6 * s, 2 * s, 0, 180); // ฐาน
+                break;
         }
         return bmp;
     }

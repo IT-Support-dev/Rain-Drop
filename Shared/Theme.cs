@@ -7,14 +7,22 @@ namespace RainDrop.Shared;
 /// <summary>Central design tokens. UI code must use these instead of ad-hoc colors/sizes.</summary>
 internal static class Theme
 {
-    // Surfaces
-    internal static readonly Color Background = Color.FromArgb(30, 31, 34);
-    internal static readonly Color Surface = Color.FromArgb(43, 45, 49);
-    internal static readonly Color SurfaceAlt = Color.FromArgb(49, 51, 56);
-    internal static readonly Color SurfaceHover = Color.FromArgb(53, 55, 60);
+    // Surfaces (zone brightness levels for clear visual separation)
+    internal static readonly Color Background = Color.FromArgb(30, 31, 34);   // Zone 1: content area (darkest)
+    internal static readonly Color Surface = Color.FromArgb(43, 45, 49);      // Zone 2: sidebar
+    internal static readonly Color SurfaceAlt = Color.FromArgb(49, 51, 56);   // Zone 3: header / toolbar
+    internal static readonly Color SurfaceHover = Color.FromArgb(53, 55, 60); // Zone 4: status bar / active element
     internal static readonly Color SurfacePressed = Color.FromArgb(64, 68, 75);
     internal static readonly Color Border = Color.FromArgb(63, 65, 71);
+    internal static readonly Color Divider = Color.FromArgb(63, 65, 71);      // เส้นแบ่งโซนสีจาง
     internal static readonly Color InputBackground = Color.FromArgb(30, 31, 34);
+    internal static readonly Color PlaceholderText = Color.FromArgb(148, 155, 164);
+
+    // Zone aliases for explicit visual separation in MainForm
+    internal static readonly Color ZoneContent = Background;      // พื้นที่เนื้อหา (เข้มสุด)
+    internal static readonly Color ZoneSidebar = Surface;          // แถบซ้าย
+    internal static readonly Color ZoneHeader = SurfaceAlt;         // หัวเครื่องมือ
+    internal static readonly Color ZoneStatus = SurfaceHover;       // แถบสถานะล่าง
 
     // Text (contrast-tested against the surfaces where they are used)
     internal static readonly Color TextPrimary = Color.FromArgb(242, 243, 245);
