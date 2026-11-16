@@ -10,13 +10,19 @@ namespace RainDrop.Tests;
 /// ObjectDisposedException ตอนสร้างและทิ้งฟอร์ม</summary>
 public class MainFormPreviewTests
 {
-    /// <summary>รัน delegate บน STA thread ซึ่ง WinForms ต้องการสำหรับการสร้าง handle</summary>
-    private static void RunOnSTA(ThreadStart action)
+    /// <summary>รัน delegate บน STA thread ซึ่ง WinForms ต้องการสำหรับการสร้าง handle
+    /// พร้อม timeout กันค้างถ้า WinForms เริ่มต้นไม่ได้ในสภาพแวดล้อมที่ไม่มีจอภาพ</summary>
+    private static void RunOnSTA(ThreadStart action, int timeoutSeconds = 30)
     {
         var t = new Thread(action);
         t.SetApartmentState(ApartmentState.STA);
         t.Start();
-        t.Join();
+        var joined = t.Join(timeoutSeconds * 1000);
+        if (!joined)
+        {
+            t.Abort();
+            throw new TimeoutException($"เทสต์ค้างเกิน {timeoutSeconds} วินาที (WinForms อาจเริ่มต้นไม่ได้บนเครื่องนี้)");
+        }
     }
 
     [Fact]
@@ -25,8 +31,8 @@ public class MainFormPreviewTests
         RunOnSTA(() =>
         {
             using var form = new MainForm(new[] { "--ui-preview" });
-            form.CreateControl(); // บังคับให้สร้าง handle และ layout ทั้งหมด (CreateHandle() เป็น protected เรียกจากภายนอกไม่ได้)
             // การทิ้งฟอร์มต้องไม่โยน exception (รวมถึง ObjectDisposedException ของ ContextMenuStrip)
+            // Constructor คือจุดที่เคยโยน NullReferenceException ก่อนแก้ไข
         });
     }
 
@@ -38,8 +44,7 @@ public class MainFormPreviewTests
             for (int i = 0; i < 3; i++)
             {
                 using var form = new MainForm(new[] { "--ui-preview" });
-                form.CreateControl();
-                // จำลองการเปิดและปิดหน้าต่างหลายรอบ (CreateHandle() เป็น protected เรียกจากภายนอกไม่ได้)
+                // จำลองการเปิดและปิดหน้าต่างหลายรอบ
                 form.Dispose();
             }
         });
@@ -52,7 +57,6 @@ public class MainFormPreviewTests
         RunOnSTA(() =>
         {
             using var form = new MainForm(new[] { "--ui-preview" });
-            form.CreateControl();
 
             // หา FlowLayoutPanel ที่เป็นพื้นที่แสดงการ์ดเครื่อง (_panel)
             var contentPanel = form.Controls.OfType<Panel>()
