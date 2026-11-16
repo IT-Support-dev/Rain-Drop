@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -622,7 +623,7 @@ internal sealed class MainForm : Form
             if (!_settings.IgnoredMachines.Contains(tile.Host.Name, StringComparison.OrdinalIgnoreCase))
                 _settings.IgnoredMachines.Add(tile.Host.Name);
             _tiles.Remove(tile);
-            _panel.Controls.Remove(tile);
+            _panel.Controls.Remove((Control)tile);
             if (_chats.Remove(tile, out var chat)) chat.ForceClose();
             tile.Dispose();
         }
