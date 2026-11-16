@@ -83,12 +83,8 @@ internal sealed class UiButton : Button
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        if (Focused && Enabled)
-        {
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var path = Theme.RoundedRect(new Rectangle(1, 1, Width - 3, Height - 3), Theme.RadiusSmall);
-            e.Graphics.DrawPath(Theme.Pen(Theme.TextPrimary, 1.5F), path);
-        }
+        // ลบ focus rectangle สีขาวที่ติดปุ่มตามคำแนะนำจากภาพจริง;
+        // การชี้ชัดโฟกัสทำผ่านสีพื้น hover/pressed แทน
     }
     protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
     protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
@@ -173,12 +169,205 @@ internal sealed class StatusBadge : Control
 
 internal static class UiInput
 {
-    internal static TextBox Create(string text = "", bool multiline = false, bool secret = false)
+    internal static TextBox Create(string text = "", bool multiline = false, bool secret = false, string? placeholder = null)
     {
-        var box = new TextBox { Text = text, Multiline = multiline, UseSystemPasswordChar = secret };
+        var box = new PlaceholderTextBox { Text = text, Multiline = multiline, UseSystemPasswordChar = secret, PlaceholderText = placeholder ?? "" };
         Theme.StyleInput(box);
         if (!multiline) box.Height = Theme.InputHeight;
         return box;
+    }
+
+    /// <summary>ช่องค้นหาพร้อมไอคอนแว่นขยายฝั่งซ้ายและ placeholder สีจาง</summary>
+    internal static Panel SearchBox(string placeholder, Action<string>? onTextChanged = null)
+    {
+        var container = new Panel
+        {
+            Height = Theme.InputHeight,
+            BackColor = Theme.InputBackground,
+        };
+        using var iconPath = Theme.RoundedRect(new Rectangle(0, 0, Theme.InputHeight, Theme.InputHeight), Theme.RadiusSmall);
+        container.Region = new Region(iconPath);
+
+        var icon = new PictureBox
+        {
+            Image = UiIcons.Get(UiIcon.Monitor, Theme.PlaceholderText, Theme.IconSize),
+            Size = new Size(Theme.IconSize, Theme.IconSize),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Location = new Point(Theme.Space2, (Theme.InputHeight - Theme.IconSize) / 2),
+            BackColor = Color.Transparent,
+        };
+
+        var box = new PlaceholderTextBox
+        {
+            PlaceholderText = placeholder,
+            BorderStyle = BorderStyle.None,
+            BackColor = Theme.InputBackground,
+            ForeColor = Theme.TextPrimary,
+            Font = Theme.FontBody,
+            Location = new Point(Theme.InputHeight + Theme.Space2, 0),
+            Size = new Size(200, Theme.InputHeight),
+            Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom,
+        };
+        box.GotFocus += (_, _) => box.BackColor = Theme.Surface;
+        box.LostFocus += (_, _) => box.BackColor = Theme.InputBackground;
+        if (onTextChanged is not null) box.TextChanged += (_, _) => onTextChanged(box.Text);
+
+        container.Controls.Add(box);
+        container.Controls.Add(icon);
+        return container;
+    }
+
+    private sealed class PlaceholderTextBox : TextBox
+    {
+        private string _placeholder = "";
+        private bool _showPlaceholder;
+
+        public string PlaceholderText
+        {
+            get => _placeholder;
+            set { _placeholder = value; UpdatePlaceholder(); Invalidate(); }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            UpdatePlaceholder();
+        }
+
+        protected override void OnTextChanged(EventArgs e)
+        {
+            base.OnTextChanged(e);
+            UpdatePlaceholder();
+        }
+
+        protected override void OnGotFocus(EventArgs e)
+        {
+            base.OnGotFocus(e);
+            _showPlaceholder = false;
+            Invalidate();
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            base.OnLostFocus(e);
+            UpdatePlaceholder();
+        }
+
+        private void UpdatePlaceholder()
+        {
+            _showPlaceholder = string.IsNullOrEmpty(Text) && !Focused && !string.IsNullOrEmpty(_placeholder);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (_showPlaceholder)
+            {
+                TextRenderer.DrawText(e.Graphics, _placeholder, Font,
+                    new Rectangle(Theme.Space2, 0, Width - Theme.Space4, Height),
+                    Theme.PlaceholderText, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+            }
+        }
+    }
+}
+
+/// <summary>ปุ่มทรีสต์สำหรับกรองสถานะ: ทั้งหมด / ออนไลน์ / ออฟไลน์ สลับเลือกได้อันเดียว</summary>
+internal sealed class UiSegmentedFilter : FlowLayoutPanel
+{
+    private readonly List<UiButton> _buttons = new();
+    private int _selectedIndex;
+
+    public int SelectedIndex
+    {
+        get => _selectedIndex;
+        set { _selectedIndex = value; UpdateStates(); }
+    }
+
+    public event EventHandler<int>? SelectionChanged;
+
+    internal UiSegmentedFilter(string[] labels, int selectedIndex = 0)
+    {
+        FlowDirection = FlowDirection.LeftToRight;
+        WrapContents = false;
+        AutoSize = true;
+        _selectedIndex = selectedIndex;
+        foreach (var (label, i) in labels.Select((l, idx) => (l, idx)))
+        {
+            var b = new UiButton(label, ButtonKind.Secondary)
+            {
+                Height = Theme.ButtonHeight,
+                Margin = new Padding(0, 0, Theme.Space1, 0),
+                TabIndex = i,
+            };
+            b.Click += (_, _) => { SelectedIndex = i; SelectionChanged?.Invoke(this, i); };
+            _buttons.Add(b);
+            Controls.Add(b);
+        }
+        UpdateStates();
+    }
+
+    private void UpdateStates()
+    {
+        for (int i = 0; i < _buttons.Count; i++)
+        {
+            var b = _buttons[i];
+            bool sel = i == _selectedIndex;
+            b.Kind = sel ? ButtonKind.Primary : ButtonKind.Secondary;
+            b.ForeColor = sel ? Theme.OnAccent : Theme.TextSecondary;
+        }
+    }
+}
+
+/// <summary>รายการเมนูแถบซ้ายแบบเดียวกันทุกแถว: ไอคอนชิดซ้ายเท่ากัน ข้อความน้ำหนักปกติ โฮเวอร์เต็มความกว้าง</summary>
+internal sealed class UiSidebarItem : Panel
+{
+    private readonly Label _label;
+    private bool _selected;
+
+    public UiSidebarItem(UiIcon icon, string text)
+    {
+        Height = Theme.ButtonHeightLarge;
+        Margin = new Padding(0, Theme.Space1, 0, Theme.Space1);
+        BackColor = Color.Transparent;
+        Cursor = Cursors.Hand;
+
+        var iconBox = new PictureBox
+        {
+            Image = UiIcons.Get(icon, Theme.TextSecondary, Theme.IconSizeLarge),
+            Size = new Size(Theme.IconSizeLarge, Theme.IconSizeLarge),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Location = new Point(Theme.Space2, (Theme.ButtonHeightLarge - Theme.IconSizeLarge) / 2),
+            BackColor = Color.Transparent,
+        };
+
+        _label = new Label
+        {
+            Text = text,
+            Font = Theme.FontBody, // น้ำหนักปกติ ไม่ใช่ตัวหนา
+            ForeColor = Theme.TextSecondary,
+            Location = new Point(Theme.InputHeight + Theme.Space3, 0),
+            AutoSize = false,
+            Height = Theme.ButtonHeightLarge,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom,
+        };
+
+        Controls.Add(iconBox);
+        Controls.Add(_label);
+
+        MouseEnter += (_, _) => { if (!_selected) { BackColor = Theme.SurfaceHover; _label.ForeColor = Theme.TextPrimary; } };
+        MouseLeave += (_, _) => { if (!_selected) { BackColor = Color.Transparent; _label.ForeColor = Theme.TextSecondary; } };
+    }
+
+    public bool Selected
+    {
+        get => _selected;
+        set
+        {
+            _selected = value;
+            BackColor = _selected ? Theme.SurfacePressed : Color.Transparent;
+            _label.ForeColor = _selected ? Theme.TextPrimary : Theme.TextSecondary;
+        }
     }
 }
 

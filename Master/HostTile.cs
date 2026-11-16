@@ -72,6 +72,21 @@ internal sealed class HostTile : UserControl
 
         var surface = new UiCard { Dock = DockStyle.Fill, Padding = new Padding(Theme.Space2) };
         _pic = new UiPictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
+        // ยังไม่มีภาพจากเครื่องลูก ให้แสดงไอคอนเครื่องจางๆ แทนพื้นว่าง
+        _pic.Paint += (_, e) =>
+        {
+            if (_pic.Image is null)
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                // UiIcons เป็น cache — วาดทับได้ ไม่ต้อง Dispose
+                var icon = UiIcons.Get(UiIcon.Computer, Theme.TextDisabled, 48);
+                var rect = new Rectangle(
+                    (_pic.Width - 48) / 2,
+                    (_pic.Height - 48) / 2,
+                    48, 48);
+                e.Graphics.DrawImage(icon, rect);
+            }
+        };
         _name = new Label
         {
             Dock = DockStyle.Top,
@@ -210,6 +225,100 @@ internal sealed class HostTile : UserControl
             _client?.Dispose();
             _pic.Image?.Dispose();
         }
+        base.Dispose(disposing);
+    }
+}
+
+/// <summary>การ์ดสำหรับโหมดตัวอย่าง UI: แสดงสถานะจำลองโดยไม่เชื่อมต่อเครือข่าย</summary>
+internal sealed class PreviewHostTile : UserControl
+{
+    private readonly PictureBox _pic;
+    private readonly Label _name;
+    private readonly Label _address;
+    private readonly StatusBadge _badge;
+    private bool _selected;
+    private bool _hasUnread;
+
+    public HostEntry Host { get; }
+    public bool IsOnline { get; }
+    public bool Selected
+    {
+        get => _selected;
+        set { _selected = value; UpdateBorder(); }
+    }
+    public bool HasUnread
+    {
+        get => _hasUnread;
+        set { _hasUnread = value; UpdateBorder(); }
+    }
+
+    public PreviewHostTile(HostEntry host, StatusKind kind)
+    {
+        Host = host;
+        IsOnline = kind is StatusKind.Online;
+
+        Size = new Size(Theme.CardWidth, Theme.CardHeight);
+        Margin = new Padding(Theme.Space2);
+        Padding = new Padding(Theme.Space1);
+        BackColor = Theme.Border;
+        DoubleBuffered = true;
+
+        var surface = new UiCard { Dock = DockStyle.Fill, Padding = new Padding(Theme.Space2) };
+        _pic = new UiPictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Background };
+        // ยังไม่มีภาพตัวอย่าง ให้แสดงไอคอนเครื่องจางๆ แทน
+        _pic.Image = UiIcons.Get(UiIcon.Computer, Theme.TextDisabled, 48);
+        _name = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = Theme.Space5,
+            Text = host.Name,
+            Font = Theme.FontBodyStrong,
+            ForeColor = Theme.TextPrimary,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+        };
+        _address = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = Theme.Space4,
+            Text = host.Address,
+            Font = Theme.FontCaption,
+            ForeColor = Theme.TextMuted,
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+        };
+        var statusText = kind switch
+        {
+            StatusKind.Online => "ออนไลน์",
+            StatusKind.Waiting => "รอเชื่อมต่อ",
+            StatusKind.Error => "ผิดพลาด",
+            _ => "ออฟไลน์",
+        };
+        _badge = new StatusBadge(kind, statusText) { Dock = DockStyle.Top, Margin = new Padding(0, Theme.Space1, 0, Theme.Space1) };
+
+        surface.Controls.Add(_pic);
+        surface.Controls.Add(_badge);
+        surface.Controls.Add(_address);
+        surface.Controls.Add(_name);
+        Controls.Add(surface);
+
+        void Select(object? s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Selected = !Selected; }
+        _pic.MouseClick += Select;
+        _name.MouseClick += Select;
+        AccessibleName = $"เครื่อง {host.Name}";
+    }
+
+    private void UpdateBorder() => BackColor =
+        _hasUnread ? Theme.Waiting :
+        _selected ? Theme.AccentHover :
+        Theme.Border;
+
+    public void Start() { }
+    public void Reconnect() { }
+
+    protected override void Dispose(bool disposing)
+    {
+        // _pic.Image เป็นไอคอนจาก UiIcons cache — ไม่ต้อง Dispose
         base.Dispose(disposing);
     }
 }

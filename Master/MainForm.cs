@@ -1,20 +1,22 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using RainDrop.Shared;
 
 namespace RainDrop.Master;
 
 /// <summary>
-/// หน้าจอหลัก: แสดงหน้าจอทุกเครื่องเป็นตาราง + แถบเครื่องมือสั่งงาน
+/// หน้าจอหลัก: แสดงการ์ดเครื่องลูกเป็นตาราง + แถบเครื่องมือสั่งงาน
 /// คำสั่งจะส่งไปยังเครื่องที่เลือกไว้ ถ้าไม่ได้เลือกเลยจะส่งไปทุกเครื่อง
+/// เปิดด้วย --ui-preview (เฉพาะ DEBUG) จะแสดงข้อมูลจำลอง 6 เครื่องโดยไม่เชื่อมต่อเครือข่าย
 /// </summary>
 internal sealed class MainForm : Form
 {
     private readonly MasterSettings _settings;
     private readonly MasterKey _key;
     private readonly MasterPki _pki;
-    private readonly FlowLayoutPanel _panel;                 // ตารางจอภาพ (เนื้อหาจริง)
-    private readonly FlowLayoutPanel _channelList = new UiFlowPanel();   // รายการ "ช่อง" = เครื่องลูก (แถบซ้าย)
+    private readonly FlowLayoutPanel _panel;                 // ตารางการ์ดเครื่อง (เนื้อหาจริง)
+    private readonly FlowLayoutPanel _channelList = new UiFlowPanel();   // รายการเครื่องในแถบซ้าย
     private readonly Label _status = new();
     private readonly System.Windows.Forms.Timer _sidebarTimer = new() { Interval = 1500 };
     private readonly List<HostTile> _tiles = new();
@@ -23,19 +25,49 @@ internal sealed class MainForm : Form
     private readonly NotifyIcon _tray = new() { Icon = AppIcon.Load(), Text = "Rain Drop Master", Visible = true };
     private readonly List<AlertMsg> _alertLog = new();
     private readonly List<ToastForm> _toasts = new();
+    private readonly bool _uiPreview;                        // โหมดทดสอบ UI ด้วยข้อมูลจำลอง
 
-    public MainForm()
+    public MainForm(string[] args)
     {
+        _uiPreview = args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase);
+
+#if !DEBUG
+        // --ui-preview เปิดได้เฉพาะบิลด์ DEBUG เท่านั้น ป้องกันไม่ให้ติดไปกับตัวติดตั้งจริง
+        _uiPreview = false;
+#endif
+
         Text = "Rain Drop Master";
         Icon = AppIcon.Load();
         Theme.ConfigureForm(this, new Size(900, 600));
         UiWindowPlacement.Attach(this, "master", new Size(1400, 860), new Size(900, 600));
 
-        _settings = MasterSettings.Load();
-        _key = MasterKey.LoadOrCreate();
-        _pki = MasterPki.LoadOrCreate();
+        if (_uiPreview)
+        {
+            // โหมดตัวอย่าง: ไม่เขียนตั้งค่า ไม่เชื่อมต่อเครือข่าย ใช้ข้อมูลจำลอง
+            // สร้าง CA คู่เดียวแล้วออก client cert จากคู่นั้น เพื่อให้ _pki และ _key ไม่ null
+            // (ทั้งคู่ไม่ถูกใช้จริงในโหมดตัวอย่าง เพราะทุกเส้นทางคำสั่งจะคืนเร็วด้วยข้อความ "โหมดตัวอย่าง")
+            var ca = RepoCertificates.CreateCa();
+            var caKey = ca.GetECDsaPrivateKey()!;
+            var clientCert = RepoCertificates.IssueClient(ca, caKey);
+            _settings = new MasterSettings { AutoDiscover = false };
+            _key = MasterKey.CreateForPreview(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+            _pki = MasterPki.CreateForPreview(caKey, ca, clientCert);
 
-        _panel = new UiFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.Background };
+            AddMockTiles();
+        }
+        else
+        {
+            _settings = MasterSettings.Load();
+            _key = MasterKey.LoadOrCreate();
+            _pki = MasterPki.LoadOrCreate();
+
+            foreach (var host in _settings.Hosts)
+                AddTile(host);
+        }
+
+        _panel = new UiFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.ZoneContent };
+        ApplyDarkScrollbars(_panel);
+
         var content = BuildContent();
         content.TabIndex = 1;
         Controls.Add(content);
@@ -43,8 +75,6 @@ internal sealed class MainForm : Form
         sidebar.TabIndex = 0;
         Controls.Add(sidebar);
 
-        foreach (var host in _settings.Hosts)
-            AddTile(host);
         ApplyFilter();
 
         _sidebarTimer.Tick += (_, _) => ApplyFilter();
@@ -52,107 +82,356 @@ internal sealed class MainForm : Form
         RefreshSidebars();
     }
 
-    // ===================== โครงหน้าจอมืดแบบ token =====================
+    // ===================== โหมดตัวอย่าง UI =====================
 
-    private readonly TextBox _search = UiInput.Create();
-    private readonly ComboBox _filter = new() { DropDownStyle = ComboBoxStyle.DropDownList };
-    private readonly Label _count = new() { AutoSize = true, Font = Theme.FontCaption, ForeColor = Theme.TextMuted };
-    private readonly Panel _empty = new() { Dock = DockStyle.Fill, BackColor = Theme.Background };
-    private string _query = "";
-    private MachineStatusFilter _statusFilter = MachineStatusFilter.All;
+    private void AddMockTiles()
+    {
+        var mocks = new[]
+        {
+            ("สำนักงานใหญ่", "192.168.1.10", true,  StatusKind.Online),
+            ("แผนกบัญชี",    "192.168.1.23", false, StatusKind.Offline),
+            ("แผนกไอที",     "192.168.1.41", true,  StatusKind.Online),
+            ("คลังสินค้า",   "192.168.1.77", false, StatusKind.Waiting),
+            ("ห้องประชุม",   "192.168.1.91", false, StatusKind.Error),
+            ("ผู้บริหาร",     "192.168.1.55", true,  StatusKind.Online),
+        };
+        foreach (var (name, address, online, kind) in mocks)
+        {
+            var host = new HostEntry { Name = name, Address = address };
+            var tile = new PreviewHostTile(host, kind);
+            _tiles.Add(tile);
+            _panel.Controls.Add(tile);
+        }
+    }
+
+    // ===================== โครงหน้าจอแบ่งโซนสี =====================
 
     private Control BuildSidebar()
     {
-        var sidebar = new Panel { Dock = DockStyle.Left, Width = Theme.SidebarWidth, BackColor = Theme.Surface, Padding = new Padding(Theme.Space3) };
-        var header = new Label { Dock = DockStyle.Top, Height = Theme.ToolbarHeight, Text = "Rain Drop", ForeColor = Theme.TextPrimary, Font = Theme.FontHeading, TextAlign = ContentAlignment.MiddleLeft };
-        _search.Dock = DockStyle.Top;
-        _search.TabIndex = 0;
-        _search.AccessibleName = "ค้นหาเครื่อง";
-        Theme.SetToolTip(_search, "ค้นหาชื่อเครื่องหรือ IP");
-        _search.TextChanged += (_, _) => { _query = _search.Text; ApplyFilter(); };
-        _filter.Dock = DockStyle.Top;
-        _filter.TabIndex = 1;
-        _filter.Font = Theme.FontBody;
-        _filter.BackColor = Theme.InputBackground;
-        _filter.ForeColor = Theme.TextPrimary;
-        _filter.FlatStyle = FlatStyle.Flat;
-        _filter.Items.AddRange(new object[] { "ทุกสถานะ", "ออนไลน์", "ออฟไลน์" });
-        _filter.SelectedIndex = 0;
-        _filter.AccessibleName = "กรองสถานะเครื่อง";
-        _filter.SelectedIndexChanged += (_, _) => { _statusFilter = (MachineStatusFilter)_filter.SelectedIndex; ApplyFilter(); };
+        var sidebar = new Panel
+        {
+            Dock = DockStyle.Left,
+            Width = Theme.SidebarWidth,
+            BackColor = Theme.ZoneSidebar,
+            Padding = new Padding(Theme.Space3),
+        };
+
+        // หัวเรื่องพร้อมโลโก้หยดน้ำ (ขนาดสมดุลกับข้อความ)
+        var header = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = Theme.Space6 * 2,
+            AutoSize = false,
+            WrapContents = false,
+            BackColor = Color.Transparent,
+        };
+        var logo = new PictureBox
+        {
+            Image = AppIcon.Load(),
+            Size = new Size(Theme.IconSizeLarge * 2, Theme.IconSizeLarge * 2),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Color.Transparent,
+        };
+        var title = new Label
+        {
+            Text = "Rain Drop",
+            Font = Theme.FontTitle,          // ลดลงเหลือ 12pt สมดุลกับโลโก้
+            ForeColor = Theme.TextPrimary,
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(Theme.Space2, 0, 0, 0),
+        };
+        header.Controls.Add(logo);
+        header.Controls.Add(title);
+
+        // ช่องค้นหา: UiInput แบบวาดเอง มี placeholder + ไอคอนแว่น
+        var searchLabel = Theme.SectionLabel("ค้นหาเครื่อง");
+        var search = UiInput.SearchBox("ค้นหาเครื่อง...", text => { _query = text; ApplyFilter(); });
+        search.Dock = DockStyle.Top;
+        search.Height = Theme.InputHeight;
+        Theme.SetToolTip(search, "ค้นหาชื่อเครื่องหรือ IP");
+
+        // ตัวกรองสถานะ: ปุ่ม chip แบบ segmented แทน ComboBox
+        var filterLabel = Theme.SectionLabel("สถานะ");
+        var filter = new UiSegmentedFilter(new[] { "ทั้งหมด", "ออนไลน์", "ออฟไลน์" }, 0);
+        filter.SelectionChanged += (_, i) => { _statusFilter = (MachineStatusFilter)i; ApplyFilter(); };
+
         _count.Dock = DockStyle.Top;
         _count.Padding = new Padding(0, Theme.Space2, 0, Theme.Space2);
+        _count.ForeColor = Theme.TextMuted;
 
         _channelList.Dock = DockStyle.Fill;
         _channelList.FlowDirection = FlowDirection.TopDown;
         _channelList.WrapContents = false;
         _channelList.AutoScroll = true;
-        _channelList.BackColor = Theme.Surface;
+        _channelList.BackColor = Theme.ZoneSidebar;
+        ApplyDarkScrollbars(_channelList);
 
+        // ปุ่มท้ายแถบ: ตั้งค่า / ชุมชน เป็น ghost ธรรมดา
         var settings = new UiButton("ตั้งค่า", ButtonKind.Ghost, UiIcon.Settings) { Dock = DockStyle.Bottom };
         settings.TabIndex = 4;
         settings.Click += (_, _) => ShowSettings();
         var community = new UiButton("ชุมชน", ButtonKind.Ghost, UiIcon.Chat) { Dock = DockStyle.Bottom };
         community.TabIndex = 3;
         community.Click += (_, _) => OpenCommunity();
-        var add = new UiButton("เพิ่มเครื่อง", ButtonKind.Secondary, UiIcon.Plus) { Dock = DockStyle.Bottom };
+
+        // ปุ่ม "เพิ่มเครื่อง" เป็น primary เต็มความกว้างอยู่เหนือรายการปุ่มอื่น
+        var add = new UiButton("เพิ่มเครื่อง", ButtonKind.Primary, UiIcon.Plus) { Dock = DockStyle.Bottom };
+        add.Height = Theme.ButtonHeightLarge;
+        add.Margin = new Padding(0, Theme.Space2, 0, 0);
         add.TabIndex = 2;
         add.Click += (_, _) => AddHost();
 
         sidebar.Controls.Add(_channelList);
         sidebar.Controls.Add(_count);
-        sidebar.Controls.Add(_filter);
-        sidebar.Controls.Add(_search);
+        sidebar.Controls.Add(filter);
+        sidebar.Controls.Add(search);
+        sidebar.Controls.Add(searchLabel);
         sidebar.Controls.Add(header);
         sidebar.Controls.Add(settings);
         sidebar.Controls.Add(community);
         sidebar.Controls.Add(add);
+
+        // เส้นแบ่งท้ายแถบซ้าย
+        var divider = new Panel { Dock = DockStyle.Right, Width = 1, BackColor = Theme.Divider };
+        sidebar.Controls.Add(divider);
+        divider.BringToFront();
+
         return sidebar;
     }
 
     private Control BuildContent()
     {
-        var center = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Background };
-        var toolbar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Theme.ToolbarHeight, Padding = new Padding(Theme.Space3, Theme.Space2, Theme.Space3, Theme.Space2), BackColor = Theme.Background, WrapContents = false, AutoScroll = true };
-        void Tool(UiIcon icon, string tip, Action act, ButtonKind kind = ButtonKind.Ghost)
+        var center = new Panel { Dock = DockStyle.Fill, BackColor = Theme.ZoneContent };
+
+        // แถบเครื่องมือ: แบ่งกลุ่มด้วยช่องว่าง ปุ่มหลักมีข้อความกำกับ ไอคอน 20px พื้นที่กด ≥ 36px
+        var toolbar = new FlowLayoutPanel
         {
-            var b = new UiButton("", kind, icon) { Width = Theme.ButtonHeightLarge, Height = Theme.ButtonHeight };
+            Dock = DockStyle.Top,
+            Height = Theme.ToolbarHeight,
+            Padding = new Padding(Theme.Space3, Theme.Space2, Theme.Space3, Theme.Space2),
+            BackColor = Theme.ZoneHeader,
+            WrapContents = false,
+            AutoScroll = true,
+        };
+        ApplyDarkScrollbars(toolbar);
+
+        void Group(string label)
+        {
+            var g = new Label
+            {
+                Text = label,
+                Font = Theme.FontCaptionStrong,
+                ForeColor = Theme.TextMuted,
+                AutoSize = true,
+                Margin = new Padding(Theme.Space3, Theme.Space1, Theme.Space1, Theme.Space1),
+                Height = Theme.ButtonHeight,
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+            toolbar.Controls.Add(g);
+        }
+
+        void Tool(UiIcon icon, string text, string tip, Action act, ButtonKind kind = ButtonKind.Ghost, bool showLabel = false)
+        {
+            var container = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Margin = new Padding(Theme.Space2, 0, Theme.Space2, 0),
+            };
+            // ปุ่มหลักเป็นไอคอนอย่างเดียว ข้อความกำกับอยู่ใต้ปุ่ม
+            var b = new UiButton("", kind, icon)
+            {
+                Width = Theme.ButtonHeightLarge,
+                Height = Theme.ButtonHeightLarge,
+                Margin = new Padding(0, 0, 0, Theme.Space1),
+            };
             Theme.SetToolTip(b, tip);
             b.Click += (_, _) => act();
-            toolbar.Controls.Add(b);
+            container.Controls.Add(b);
+            if (showLabel && !string.IsNullOrEmpty(text))
+            {
+                var lbl = new Label
+                {
+                    Text = text,
+                    Font = Theme.FontCaption,
+                    ForeColor = Theme.TextSecondary,
+                    AutoSize = true,
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Margin = new Padding(0, 0, 0, 0),
+                };
+                container.Controls.Add(lbl);
+            }
+            toolbar.Controls.Add(container);
         }
-        void Sep() => toolbar.Controls.Add(new Panel { Width = 1, Height = Theme.ButtonHeight, BackColor = Theme.Border, Margin = new Padding(Theme.Space2, Theme.Space1, Theme.Space2, Theme.Space1) });
-        Tool(UiIcon.Refresh, "ค้นหาเครื่องในเครือข่าย", () => _ = DiscoverAsync(userInitiated: true));
-        Tool(UiIcon.Plus, "เพิ่มเครื่องเอง", AddHost);
-        Sep();
-        Tool(UiIcon.Monitor, "ควบคุมระยะไกล", OpenRemoteForSelected);
-        Tool(UiIcon.Chat, "แชท", OpenChatForSelected);
-        Tool(UiIcon.Message, "ส่งข้อความ", SendMessageToTargets);
-        Sep();
-        Tool(UiIcon.Lock, "ล็อกหน้าจอ", LockTargets);
-        Tool(UiIcon.Unlock, "ปลดล็อก", () => Broadcast(c => c.Send(MsgType.Unlock)));
-        Tool(UiIcon.Power, "ปิดเครื่อง", () => Power(PowerAction.Shutdown, "ปิดเครื่อง"), ButtonKind.Danger);
-        Sep();
-        Tool(UiIcon.Activity, "ดูกิจกรรม", OpenActivityForSelected);
-        Tool(UiIcon.Block, "บล็อกโปรแกรม/เว็บ", OpenBlockSettings);
-        Tool(UiIcon.More, "เพิ่มเติม", ShowMoreMenu);
 
-        _panel.Padding = new Padding(Theme.Space3);
-        _empty.Controls.Add(new Label
+        void Sep() => toolbar.Controls.Add(new Panel
         {
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Theme.TextMuted,
-            Font = Theme.FontMedium,
-            Text = "ยังไม่มีเครื่องที่แสดง\nกดค้นหาเพื่อหาเครื่องในแลน หรือเพิ่มเครื่องด้วย IP\nใช้ช่องค้นหา/ตัวกรองด้านซ้ายเพื่อหารายการ",
+            Width = 1,
+            Height = Theme.ButtonHeightLarge,
+            BackColor = Theme.Divider,
+            Margin = new Padding(Theme.Space2, Theme.Space1, Theme.Space2, Theme.Space1),
         });
+
+        Group("ค้นหา");
+        Tool(UiIcon.Refresh, "ค้นหา", "ค้นหาเครื่องในเครือข่าย", () => _ = DiscoverAsync(userInitiated: true), primaryLabel: true);
+        Tool(UiIcon.Plus, "เพิ่ม", "เพิ่มเครื่องเองด้วย IP", AddHost, primaryLabel: true);
+        Sep();
+
+        Group("ควบคุม");
+        Tool(UiIcon.Monitor, "ควบคุม", "ควบคุมระยะไกลเครื่องที่เลือก", OpenRemoteForSelected, primaryLabel: true);
+        Tool(UiIcon.Chat, "แชท", "แชทกับเครื่องที่เลือก", OpenChatForSelected, primaryLabel: true);
+        Tool(UiIcon.Message, "ข้อความ", "ส่งข้อความไปยังเครื่องที่เลือก", SendMessageToTargets, primaryLabel: true);
+        Sep();
+
+        Group("การล็อก");
+        Tool(UiIcon.Lock, "ล็อก", "ล็อกหน้าจอเครื่องที่เลือก", LockTargets, primaryLabel: true);
+        Tool(UiIcon.Unlock, "ปลดล็อก", "ปลดล็อกเครื่องที่เลือก", () => Broadcast(c => c.Send(MsgType.Unlock)), primaryLabel: true);
+        Sep();
+
+        Group("พลังงาน");
+        var powerMenu = new ContextMenuStrip();
+        Theme.StyleMenu(powerMenu);
+        var shutdown = new UiButton("ปิดเครื่อง", ButtonKind.Danger, UiIcon.Power)
+        {
+            Width = Theme.ButtonHeightLarge,
+            Height = Theme.ButtonHeightLarge,
+            ContextMenuStrip = powerMenu,
+        };
+        Theme.SetToolTip(shutdown, "ปิดเครื่อง / รีสตาร์ท / ออกจากระบบ");
+        powerMenu.Items.Add("ปิดเครื่อง", null, (_, _) => Power(PowerAction.Shutdown, "ปิดเครื่อง"));
+        powerMenu.Items.Add("รีสตาร์ท", null, (_, _) => Power(PowerAction.Restart, "รีสตาร์ท"));
+        powerMenu.Items.Add("ออกจากระบบ", null, (_, _) => Power(PowerAction.Logoff, "ออกจากระบบ"));
+        powerMenu.Closed += (_, _) => powerMenu.Dispose();
+        shutdown.MouseDown += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                powerMenu.Show(shutdown, new Point(0, shutdown.Height));
+            }
+        };
+        var powerContainer = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Margin = new Padding(Theme.Space2, 0, Theme.Space2, 0),
+        };
+        powerContainer.Controls.Add(shutdown);
+        var powerLbl = new Label
+        {
+            Text = "พลังงาน",
+            Font = Theme.FontCaption,
+            ForeColor = Theme.TextSecondary,
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleCenter,
+        };
+        powerContainer.Controls.Add(powerLbl);
+        toolbar.Controls.Add(powerContainer);
+        Sep();
+
+        Group("ดูแลระบบ");
+        Tool(UiIcon.Activity, "กิจกรรม", "ดูกิจกรรมเครื่องที่เลือก", OpenActivityForSelected, primaryLabel: true);
+        Tool(UiIcon.Block, "บล็อก", "ตั้งค่าบล็อกโปรแกรม/เว็บ", OpenBlockSettings, primaryLabel: true);
+        Tool(UiIcon.More, "เพิ่มเติม", "เมนูเพิ่มเติม", ShowMoreMenu, primaryLabel: true);
+
+        // พื้นที่แสดงการ์ดเครื่อง
+        _panel.Padding = new Padding(Theme.Space3);
+
+        // Empty state ออกแบบใหม่: ไอคอนใหญ่ หัวข้อใหญ่ คำอธิบาย ปุ่มสองปุ่มกึ่งกลาง
+        _empty = new Panel { Dock = DockStyle.Fill, BackColor = Theme.ZoneContent };
+        var emptyContainer = new Panel
+        {
+            AutoSize = true,
+            BackColor = Color.Transparent,
+        };
+        var emptyIcon = new PictureBox
+        {
+            Image = UiIcons.Get(UiIcon.Computer, Theme.TextMuted, 64),
+            Size = new Size(64, 64),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 0, 0, Theme.Space4),
+        };
+        var emptyHeading = new Label
+        {
+            Text = "ยังไม่มีเครื่องลูก",
+            Font = Theme.FontHeading,
+            ForeColor = Theme.TextPrimary,
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Margin = new Padding(0, 0, 0, Theme.Space2),
+        };
+        var emptyDesc = new Label
+        {
+            Text = "กด \"ค้นหา\" เพื่อหาเครื่องในเครือข่าย หรือกด \"เพิ่ม\" เพื่อเพิ่มเครื่องด้วย IP",
+            Font = Theme.FontBody,
+            ForeColor = Theme.TextMuted,
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleCenter,
+            MaximumSize = new Size(340, 0),
+            Margin = new Padding(0, 0, 0, Theme.Space6),
+        };
+        var emptyButtons = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = new Padding(0),
+        };
+        var btnSearch = new UiButton("ค้นหาในเครือข่าย", ButtonKind.Primary, UiIcon.Refresh)
+        {
+            Height = Theme.ButtonHeightLarge,
+            Width = Theme.ButtonWidthWide,
+            Margin = new Padding(0, 0, Theme.Space2, 0),
+        };
+        btnSearch.Click += (_, _) => _ = DiscoverAsync(userInitiated: true);
+        var btnAdd = new UiButton("เพิ่มด้วย IP", ButtonKind.Secondary, UiIcon.Plus)
+        {
+            Height = Theme.ButtonHeightLarge,
+            Width = Theme.ButtonWidthWide,
+        };
+        btnAdd.Click += (_, _) => AddHost();
+        emptyButtons.Controls.Add(btnSearch);
+        emptyButtons.Controls.Add(btnAdd);
+
+        emptyContainer.Controls.Add(emptyIcon);
+        emptyContainer.Controls.Add(emptyHeading);
+        emptyContainer.Controls.Add(emptyDesc);
+        emptyContainer.Controls.Add(emptyButtons);
+
+        // จัด empty state กึ่งกลางพื้นที่
+        var emptyCenter = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+        var emptyWrapper = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            RowCount = 1,
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            Dock = DockStyle.None,
+        };
+        emptyWrapper.Controls.Add(emptyContainer);
+        emptyWrapper.Dock = DockStyle.None;
+        emptyCenter.Controls.Add(emptyWrapper);
+        emptyWrapper.Location = new Point(0, 0); // จะจัดตำแหน่งใน Resize
+        emptyCenter.Resize += (_, _) =>
+        {
+            emptyWrapper.Left = (emptyCenter.Width - emptyWrapper.Width) / 2;
+            emptyWrapper.Top = (emptyCenter.Height - emptyWrapper.Height) / 2;
+        };
+        _empty.Controls.Add(emptyCenter);
+
         _status.Dock = DockStyle.Bottom;
         _status.Height = Theme.StatusHeight;
-        _status.BackColor = Theme.Surface;
-        _status.ForeColor = Theme.TextMuted;
+        _status.BackColor = Theme.ZoneStatus;
+        _status.ForeColor = Theme.TextSecondary;
+        _status.Font = Theme.FontBody; // ≥ 9pt
         _status.TextAlign = ContentAlignment.MiddleLeft;
         _status.Padding = new Padding(Theme.Space3, 0, 0, 0);
         _status.Text = "เลือกเครื่องเพื่อสั่งงานรายเครื่อง ถ้าไม่เลือกจะส่งไปทุกเครื่อง";
+        var statusDivider = new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = Theme.Divider };
+        center.Controls.Add(statusDivider);
 
         center.Controls.Add(_panel);
         center.Controls.Add(_empty);
@@ -184,6 +463,9 @@ internal sealed class MainForm : Form
 
     private readonly Dictionary<HostTile, Label> _channelRows = new();
     private string _sidebarSignature = "";
+    private string _query = "";
+    private MachineStatusFilter _statusFilter = MachineStatusFilter.All;
+    private Panel _empty = new() { Dock = DockStyle.Fill, BackColor = Theme.ZoneContent };
 
     private void RefreshSidebars()
     {
@@ -235,7 +517,7 @@ internal sealed class MainForm : Form
                 string text = tile.Host.Name;
                 if (row.Text != text) row.Text = text;
                 var fore = tile.Selected ? Theme.TextPrimary : tile.IsOnline ? Theme.TextSecondary : Theme.TextMuted;
-                var back = tile.Selected ? Theme.SurfacePressed : Theme.Surface;
+                var back = tile.Selected ? Theme.SurfacePressed : Theme.ZoneSidebar;
                 if (row.ForeColor != fore) row.ForeColor = fore;
                 if (row.BackColor != back) row.BackColor = back;
             }
@@ -258,7 +540,7 @@ internal sealed class MainForm : Form
             AutoEllipsis = true,
         };
         row.MouseEnter += (_, _) => { if (!tile.Selected) row.BackColor = Theme.SurfaceHover; };
-        row.MouseLeave += (_, _) => { if (!tile.Selected) row.BackColor = Theme.Surface; };
+        row.MouseLeave += (_, _) => { if (!tile.Selected) row.BackColor = Theme.ZoneSidebar; };
         row.MouseClick += (_, e) =>
         {
             if (e.Button == MouseButtons.Left)
@@ -311,6 +593,11 @@ internal sealed class MainForm : Form
 
     private void AddHost()
     {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถเพิ่มเครื่องจริงในโหมดตัวอย่างได้");
+            return;
+        }
         var values = Prompt.Show(this, "เพิ่มเครื่อง",
             ("ชื่อเครื่อง:", $"PC-{_tiles.Count + 1:00}"),
             ("IP / ชื่อโฮสต์:", "192.168.1."));
@@ -330,7 +617,7 @@ internal sealed class MainForm : Form
         foreach (var tile in selected)
         {
             _settings.Hosts.Remove(tile.Host);
-            if (!_settings.IgnoredMachines.Contains(tile.Host.Name, StringComparer.OrdinalIgnoreCase))
+            if (!_settings.IgnoredMachines.Contains(tile.Host.Name, StringComparison.OrdinalIgnoreCase))
                 _settings.IgnoredMachines.Add(tile.Host.Name);
             _tiles.Remove(tile);
             _panel.Controls.Remove(tile);
@@ -355,7 +642,7 @@ internal sealed class MainForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        if (_settings.AutoDiscover) _ = DiscoveryLoopAsync();
+        if (!_uiPreview && _settings.AutoDiscover) _ = DiscoveryLoopAsync();
     }
 
     private async Task DiscoveryLoopAsync()
@@ -370,7 +657,7 @@ internal sealed class MainForm : Form
 
     private async Task DiscoverAsync(bool userInitiated)
     {
-        if (_scanning) return;
+        if (_uiPreview || _scanning) return;
         _scanning = true;
         try
         {
@@ -386,10 +673,8 @@ internal sealed class MainForm : Form
                 string address = item.Reply.Port == _settings.Port ? ip : $"{ip}:{item.Reply.Port}";
                 string machine = item.Reply.MachineName;
 
-                // มีอยู่แล้วด้วย IP นี้
                 if (_settings.Hosts.Any(h => h.Resolve(_settings.Port).Host == ip)) continue;
 
-                // เครื่องเดิมแต่ IP เปลี่ยน (DHCP): อัปเดต IP ให้
                 var existing = _settings.Hosts.FirstOrDefault(h => h.Name.Equals(machine, StringComparison.OrdinalIgnoreCase));
                 if (existing is not null)
                 {
@@ -399,7 +684,7 @@ internal sealed class MainForm : Form
                     continue;
                 }
 
-                if (_settings.IgnoredMachines.Contains(machine, StringComparer.OrdinalIgnoreCase)) continue;
+                if (_settings.IgnoredMachines.Contains(machine, StringComparison.OrdinalIgnoreCase)) continue;
 
                 var host = new HostEntry { Name = machine, Address = address };
                 _settings.Hosts.Add(host);
@@ -439,7 +724,15 @@ internal sealed class MainForm : Form
         OpenRemote(tile);
     }
 
-    private void OpenRemote(HostTile tile) => new RemoteForm(tile.Host, _settings, _key, _pki).Show();
+    private void OpenRemote(HostTile tile)
+    {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถควบคุมระยะไกลในโหมดตัวอย่างได้");
+            return;
+        }
+        new RemoteForm(tile.Host, _settings, _key, _pki).Show();
+    }
 
     private void OpenActivity(HostTile tile) => new ActivityForm(tile.Host, _settings, _key, _pki).Show();
 
@@ -459,12 +752,14 @@ internal sealed class MainForm : Form
 
         var chat = new ChatWindow($"แชท - {tile.Host.Name} ({tile.Host.Address})", _myName, text =>
         {
+            if (_uiPreview) return false;
             if (tile.Client is not { } client) return false;
             client.SendJson(MsgType.ChatMessage, new ChatMsg(_myName, text, DateTime.Now));
             return true;
         },
         voice =>
         {
+            if (_uiPreview) return false;
             if (tile.Client is not { } client) return false;
             client.SendJson(MsgType.VoiceMessage, voice);
             return true;
@@ -491,9 +786,9 @@ internal sealed class MainForm : Form
         foreach (var tile in selected) OpenChat(tile);
     }
 
-    /// <summary>มีข้อความจากเครื่องลูก: เปิดหน้าต่างแชทของเครื่องนั้น, กะพริบที่ Taskbar และทำกรอบเป็นสีส้ม</summary>
     private void OnChatReceived(HostTile tile, ChatMsg msg)
     {
+        if (_uiPreview) return;
         var chat = GetChat(tile);
         chat.Append(msg, mine: false);
         if (!chat.ContainsFocus) tile.HasUnread = true;
@@ -503,6 +798,7 @@ internal sealed class MainForm : Form
 
     private void OnVoiceReceived(HostTile tile, VoiceMsg msg)
     {
+        if (_uiPreview) return;
         var chat = GetChat(tile);
         chat.AppendVoice(msg, mine: false);
         if (!chat.ContainsFocus) tile.HasUnread = true;
@@ -536,6 +832,11 @@ internal sealed class MainForm : Form
 
     private void LockTargets()
     {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถล็อกหน้าจอในโหมดตัวอย่างได้");
+            return;
+        }
         var values = Prompt.Show(this, "ล็อกหน้าจอ", ("ข้อความบนหน้าจอ:", "เครื่องนี้ถูกล็อกโดยผู้ดูแลระบบ"));
         if (values is null) return;
         int count = Targets().Count;
@@ -545,6 +846,11 @@ internal sealed class MainForm : Form
 
     private void SendMessageToTargets()
     {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถส่งข้อความในโหมดตัวอย่างได้");
+            return;
+        }
         var values = Prompt.Show(this, "ส่งข้อความ",
             ("หัวข้อ:", "ข้อความจากผู้ดูแลระบบ"),
             ("ข้อความ:", ""));
@@ -554,6 +860,11 @@ internal sealed class MainForm : Form
 
     private void RunOnTargets()
     {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถเปิดโปรแกรมในโหมดตัวอย่างได้");
+            return;
+        }
         var values = Prompt.Show(this, "เปิดเว็บ/โปรแกรม",
             ("URL หรือพาธโปรแกรม:", "https://"),
             ("อาร์กิวเมนต์ (ถ้ามี):", ""));
@@ -564,6 +875,11 @@ internal sealed class MainForm : Form
 
     private void Power(PowerAction action, string label)
     {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถสั่งจัดการพลังงานในโหมดตัวอย่างได้");
+            return;
+        }
         int count = Targets().Count;
         if (!Confirm(label, count)) return;
         Broadcast(c => c.SendJson(MsgType.PowerAction, new PowerCmd(action)));
@@ -571,10 +887,46 @@ internal sealed class MainForm : Form
 
     // ---------- ตั้งค่า ----------
 
+    private void ShowSettings()
+    {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถเปลี่ยนการตั้งค่าในโหมดตัวอย่างได้");
+            return;
+        }
+        var values = Prompt.Show(this, "ตั้งค่า",
+            ("พอร์ตของ Agent:", _settings.Port.ToString()),
+            ("เซิร์ฟเวอร์ชุมชน (Hub):", _settings.HubAddress),
+            ("ชื่อที่แสดงในชุมชน:", _settings.DisplayName));
+        if (values is not null)
+        {
+            if (int.TryParse(values[0], out int port) && port is > 0 and < 65536 && port != _settings.Port)
+            {
+                _settings.Port = port;
+                foreach (var tile in _tiles) tile.Reconnect();
+            }
+            _settings.HubAddress = values[1];
+            _settings.DisplayName = values[2];
+            _settings.Save();
+        }
+
+        var answer = UiDialog.Confirm(this, "กุญแจยืนยันตัวตน",
+            $"ลายนิ้วมือกุญแจของ Master:  {_key.Fingerprint}\n" +
+            "(ต้องตรงกับที่เครื่องลูกแสดง: คลิกขวาไอคอนโล่ → สถานะการเชื่อมต่อ)\n\n" +
+            "ตั้งแต่ C2a การติดตั้ง Agent ใช้ enrollment bundle (.rdrop) ที่มีรหัสผ่าน แทน master-public.pem\n" +
+            "เมนู เพิ่มเติม → ส่งออก enrollment bundle สำหรับเครื่องใหม่\n\n" +
+            "CA public: " + MasterPki.CaPublicPath + "\n" +
+            "กุญแจลับ CA/Master เข้ารหัส DPAPI CurrentUser ในโฟลเดอร์นี้ ห้ามลบหรือย้าย\n\nเปิดโฟลเดอร์เลยไหม?",
+            "เปิดโฟลเดอร์");
+        if (answer)
+            Process.Start("explorer.exe", $"/select,\"{MasterPki.CaPublicPath}\"");
+    }
+
     // ---------- การแจ้งเตือนจากเครื่องลูก ----------
 
     private void OnAlertReceived(HostTile tile, AlertMsg msg)
     {
+        if (_uiPreview) return;
         _alertLog.Insert(0, msg);
         if (_alertLog.Count > 200) _alertLog.RemoveAt(_alertLog.Count - 1);
 
@@ -586,7 +938,6 @@ internal sealed class MainForm : Form
         try { _tray.ShowBalloonTip(5000, title, msg.Text, ToolTipIcon.Warning); }
         catch (Exception ex)
         {
-            // บอลลูนเป็นช่องทางเสริม การ์ด toast และแถบสถานะยังแจ้งผู้ใช้อยู่ จึงไม่โยนต่อ
             Diag.Warn("MainForm.OnAlertReceived", "แสดงบอลลูนแจ้งเตือนที่ถาดระบบไม่สำเร็จ", ex);
         }
     }
@@ -616,6 +967,7 @@ internal sealed class MainForm : Form
 
     private void ToggleAlerts()
     {
+        if (_uiPreview) return;
         _settings.AlertsEnabled = !_settings.AlertsEnabled;
         _settings.Save();
         _status.Text = _settings.AlertsEnabled ? "เปิดการแจ้งเตือนแล้ว" : "ปิดการแจ้งเตือนแล้ว";
@@ -623,6 +975,7 @@ internal sealed class MainForm : Form
 
     private void ShowAlertLog()
     {
+        if (_uiPreview) return;
         string text = _alertLog.Count == 0
             ? "ยังไม่มีการแจ้งเตือน"
             : string.Join("\n", _alertLog.Take(50).Select(a => $"[{a.Time:HH:mm:ss}] {a.Kind}: {a.Text}"));
@@ -633,10 +986,14 @@ internal sealed class MainForm : Form
 
     private void OpenBlockSettings()
     {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถตั้งค่าบล็อกในโหมดตัวอย่างได้");
+            return;
+        }
         var targets = Targets();
         if (targets.Count == 0) { _status.Text = "ไม่มีเครื่องให้ตั้งค่า"; return; }
 
-        // ใช้รายการของเครื่องแรกที่เลือกเป็นค่าตั้งต้นให้แก้ไข
         var first = targets[0];
         _settings.Blocklists.TryGetValue(first.Host.Name, out var current);
         var result = BlockDialog.Edit(this, targets.Count, current);
@@ -657,6 +1014,11 @@ internal sealed class MainForm : Form
 
     private void OpenCommunity()
     {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถเปิดห้องชุมชนในโหมดตัวอย่างได้");
+            return;
+        }
         if (_community is { IsDisposed: false })
         {
             _community.WindowState = FormWindowState.Normal;
@@ -683,38 +1045,13 @@ internal sealed class MainForm : Form
         _community.Show();
     }
 
-    private void ShowSettings()
-    {
-        var values = Prompt.Show(this, "ตั้งค่า",
-            ("พอร์ตของ Agent:", _settings.Port.ToString()),
-            ("เซิร์ฟเวอร์ชุมชน (Hub):", _settings.HubAddress),
-            ("ชื่อที่แสดงในชุมชน:", _settings.DisplayName));
-        if (values is not null)
-        {
-            if (int.TryParse(values[0], out int port) && port is > 0 and < 65536 && port != _settings.Port)
-            {
-                _settings.Port = port;
-                foreach (var tile in _tiles) tile.Reconnect();
-            }
-            _settings.HubAddress = values[1];
-            _settings.DisplayName = values[2];
-            _settings.Save();
-        }
-
-        var answer = UiDialog.Confirm(this, "กุญแจยืนยันตัวตน",
-            $"ลายนิ้วมือกุญแจของ Master:  {_key.Fingerprint}\n" +
-            "(ต้องตรงกับที่เครื่องลูกแสดง: คลิกขวาไอคอนโล่ → สถานะการเชื่อมต่อ)\n\n" +
-            "ตั้งแต่ C2a การติดตั้ง Agent ใช้ enrollment bundle (.rdrop) ที่มีรหัสผ่าน แทน master-public.pem\n" +
-            "เมนู เพิ่มเติม → ส่งออก enrollment bundle สำหรับเครื่องใหม่\n\n" +
-            "CA public: " + MasterPki.CaPublicPath + "\n" +
-            "กุญแจลับ CA/Master เข้ารหัส DPAPI CurrentUser ในโฟลเดอร์นี้ ห้ามลบหรือย้าย\n\nเปิดโฟลเดอร์เลยไหม?",
-            "เปิดโฟลเดอร์");
-        if (answer)
-            Process.Start("explorer.exe", $"/select,\"{MasterPki.CaPublicPath}\"");
-    }
-
     private void ExportEnrollment()
     {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถส่งออก enrollment bundle ในโหมดตัวอย่างได้");
+            return;
+        }
         var values = Prompt.Show(this, "ส่งออก enrollment bundle",
             ("ชื่อเครื่องลูก (ต้องตรงกับชื่อ Windows):", ""),
             ("IP/ชื่อโฮสต์เพิ่มเติม คั่นด้วยจุลภาค:", ""));
@@ -739,6 +1076,11 @@ internal sealed class MainForm : Form
 
     private void RevokeSelected()
     {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถเพิกถอนในโหมดตัวอย่างได้");
+            return;
+        }
         var targets = Targets();
         if (targets.Count == 0 || !Confirm("เพิกถอนใบรับรอง ต้อง enroll ใหม่ก่อนใช้งานต่อ", targets.Count)) return;
         foreach (var tile in targets)
@@ -759,6 +1101,7 @@ internal sealed class MainForm : Form
 
     private void VerifyAudit()
     {
+        if (_uiPreview) return;
         var result = AuditLog.Verify(MasterPki.AuditFolder);
         UiDialog.Show(this, "Audit", result.Valid ? $"audit ถูกต้อง ({result.Records} รายการ)" : "audit ไม่ถูกต้อง: " + result.Error,
             result.Valid ? DialogKind.Info : DialogKind.Error);
@@ -766,6 +1109,21 @@ internal sealed class MainForm : Form
 
     private bool Confirm(string text, int count) =>
         UiDialog.Confirm(this, "ยืนยันคำสั่ง", $"{text}\nจะกระทบ {count} เครื่อง", "ยืนยัน", danger: true);
+
+    // ---------- Scrollbar แบบบางสีเข้มสำหรับคอนเทนเนอร์ที่เลื่อนได้ ----------
+
+    private static void ApplyDarkScrollbars(Control ctl)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            SetWindowTheme(ctl.Handle, "DarkMode_Explorer", null);
+        }
+        catch { /* best-effort */ }
+    }
+
+    [System.Runtime.InteropServices.DllImport("uxtheme.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr hWnd, string? pszSubAppName, string? pszSubIdList);
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
@@ -776,8 +1134,11 @@ internal sealed class MainForm : Form
         _discoveryCts.Cancel();
         foreach (var chat in _chats.Values) chat.ForceClose();
         foreach (var tile in _tiles) tile.Dispose();
-        _pki.Dispose();
-        _key.Dispose();
+        if (!_uiPreview)
+        {
+            _pki.Dispose();
+            _key.Dispose();
+        }
         base.OnFormClosed(e);
     }
 }

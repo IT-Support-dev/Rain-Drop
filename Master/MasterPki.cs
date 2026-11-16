@@ -43,6 +43,13 @@ internal sealed class MasterPki : IDisposable
         Audit = new AuditLog(AuditFolder);
     }
 
+    /// <summary>สร้าง instance สำหรับโหมดตัวอย่าง UI (ไม่เขียนที่เก็บ ไม่เชื่อมต่อเครือข่าย)</summary>
+    internal static MasterPki CreateForPreview(ECDsa caKey, X509Certificate2 ca, X509Certificate2 client)
+    {
+        var state = new ProtectedState(new List<IssuedAgent>(), new RevocationList(1, new List<string>()));
+        return new MasterPki(caKey, ca, client, state);
+    }
+
     public static MasterPki LoadOrCreate()
     {
         ECDsa? caKey = null;
