@@ -41,7 +41,7 @@ internal static class Theme
 
     // ---------- สีเน้นเดียว + สถานะ ----------
     internal static readonly Color Accent = Color.FromArgb(37, 99, 235);   // #3B82F6 ฟ้า — ปุ่มหลัก / เลือกเท่านั้น
-    internal static readonly Color AccentHover = Color.FromArgb(59, 130, 246);
+    internal static readonly Color AccentHover = Color.FromArgb(29, 78, 216);
     internal static readonly Color AccentPressed = Color.FromArgb(29, 78, 216);
     internal static readonly Color Online = Color.FromArgb(74, 222, 128);    // เขียว
     internal static readonly Color Waiting = Color.FromArgb(251, 191, 36);   // เหลือง
