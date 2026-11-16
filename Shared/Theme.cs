@@ -48,6 +48,8 @@ internal static class Theme
     internal static readonly Color Danger = Color.FromArgb(248, 113, 113);   // แดง
     internal static readonly Color Offline = Color.FromArgb(148, 155, 164);   // เทา
     internal static readonly Color Link = Color.FromArgb(59, 130, 246);
+    internal static readonly Color ChatBubbleMine = Mix(Accent, Surface, 0.65);
+    internal static readonly Color ChatBubbleTheirs = SurfaceAlt;
 
     // ---------- กริด 8px (ทุกระยะห่างเป็นพหุคูณของ 8) ----------
     internal const int Space1 = 8;   // 8px
