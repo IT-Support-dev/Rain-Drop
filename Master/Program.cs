@@ -64,27 +64,69 @@ internal static class Program
             catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
         }
 
+        // ถ้าเกิด exception ที่ไม่ได้จับในฟอร์มหรือเธรดใด ๆ ให้บันทึก log และแจ้งผู้ใช้เป็นภาษาไทย
+        // ก่อนปิดโปรแกรม ห้ามให้แอปตายเงียบโดยไม่บอกสาเหตุ
+        Application.ThreadException += (_, e) =>
+        {
+            Diag.Error("UnhandledUI", "เกิดข้อผิดพลาดที่ไม่ได้จับในเธรดส่วนติดต่อผู้ใช้", e.Exception);
+            ShowFatalDialog(e.Exception);
+            Environment.Exit(1);
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            var ex = e.ExceptionObject as Exception ?? new Exception("Unknown exception");
+            Diag.Error("UnhandledDomain", "เกิดข้อผิดพลาดที่ไม่ได้จับในโดเมนแอปพลิเคชัน", ex);
+            ShowFatalDialog(ex);
+            Environment.Exit(1);
+        };
+
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new MainForm());
         return 0;
     }
+
+    private static void ShowFatalDialog(Exception ex)
+    {
+        try
+        {
+            string logPath = Diag.LogPath;
+            System.Windows.Forms.MessageBox.Show(
+                $"โปรแกรม Rain Drop Master หยุดทำงานอย่างกะทันหัน\n\n" +
+                $"สาเหตุ: {ex.GetType().Name}\n{ex.Message}\n\n" +
+                $"บันทึกรายละเอียดไว้ที่ไฟล์: {logPath}\n" +
+                $"โปรดส่งไฟล์นี้ให้ทีมสนับสนุนเพื่อตรวจสอบ",
+                "Rain Drop Master – ข้อผิดพลาดร้ายแรง",
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Error);
+        }
+        catch
+        {
+            // ถ้าแสดงกล่องข้อความไม่ได้ ก็ปล่อยให้ปิดเงียบ ๆ ตามเดิม
+        }
+    }
 }
 
 /// <summary>โฟลเดอร์เก็บข้อมูลของผู้ใช้ (%AppData%\RainDrop) เพราะเขียนลง Program Files ไม่ได้</summary>
 internal static class DataFolder
 {
+    private static string? _overridePath;
+
     public static string Path
     {
         get
         {
+            if (_overridePath is not null) return _overridePath;
             string dir = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RainDrop");
             Directory.CreateDirectory(dir);
             return dir;
         }
+        internal set => _overridePath = value;
     }
+
+    internal static void ResetOverride() => _overridePath = null;
 }
 
 internal sealed class HostEntry
