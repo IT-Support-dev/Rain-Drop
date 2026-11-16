@@ -549,7 +549,7 @@ internal sealed class MainForm : Form
             if (e.Button == MouseButtons.Left)
             {
                 foreach (var t in _tiles) t.Selected = t == tile;
-                _panel.ScrollControlIntoView(tile);
+                _panel.ScrollControlIntoView((Control)tile);
                 RefreshSidebars();
             }
         };
@@ -620,7 +620,7 @@ internal sealed class MainForm : Form
         foreach (var tile in selected)
         {
             _settings.Hosts.Remove(tile.Host);
-            if (!_settings.IgnoredMachines.Contains(tile.Host.Name, StringComparison.OrdinalIgnoreCase))
+            if (!_settings.IgnoredMachines.Any(m => m.Equals(tile.Host.Name, StringComparison.OrdinalIgnoreCase)))
                 _settings.IgnoredMachines.Add(tile.Host.Name);
             _tiles.Remove(tile);
             _panel.Controls.Remove((Control)tile);
@@ -687,7 +687,7 @@ internal sealed class MainForm : Form
                     continue;
                 }
 
-                if (_settings.IgnoredMachines.Contains(machine, StringComparison.OrdinalIgnoreCase)) continue;
+                if (_settings.IgnoredMachines.Any(m => m.Equals(machine, StringComparison.OrdinalIgnoreCase))) continue;
 
                 var host = new HostEntry { Name = machine, Address = address };
                 _settings.Hosts.Add(host);
