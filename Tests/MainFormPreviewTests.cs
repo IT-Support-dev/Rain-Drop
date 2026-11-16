@@ -45,7 +45,7 @@ public class MainFormPreviewTests
         {
             //  Constructor คือจุดที่เคยโยน NullReferenceException ก่อนแก้ไข
             // ถ้าสร้าง handle ไม่ได้บน CI ให้ skip แทนการ fail build
-            global::Xunit.Assert.Skip("WinForms handle สร้างไม่ได้บนเครื่องนี้ (CI ไม่มีจอภาพแบบโต้ตอบ) — ทดสอบด้วยตนเองบน Windows");
+            throw new SkipException("WinForms handle สร้างไม่ได้บนเครื่องนี้ (CI ไม่มีจอภาพแบบโต้ตอบ) — ทดสอบด้วยตนเองบน Windows");
         }
     }
 
@@ -54,7 +54,7 @@ public class MainFormPreviewTests
     {
         if (!TryCreateAndDisposePreviewForm(new[] { "--ui-preview" }))
         {
-            global::Xunit.Assert.Skip("WinForms handle สร้างไม่ได้บนเครื่องนี้ (CI ไม่มีจอภาพแบบโต้ตอบ) — ทดสอบด้วยตนเองบน Windows");
+            throw new SkipException("WinForms handle สร้างไม่ได้บนเครื่องนี้ (CI ไม่มีจอภาพแบบโต้ตอบ) — ทดสอบด้วยตนเองบน Windows");
         }
 
         // เปิดปิดหลายรอบใน action เดียว (ถ้ารอบแรกสร้างสำเร็จ รอบถัดไปควรสำเร็จเช่นกัน)
@@ -79,7 +79,7 @@ public class MainFormPreviewTests
         t.Start();
         var joined = t.Join(15_000);
         if (!joined || completed != true)
-            global::Xunit.Assert.Skip("WinForms handle สร้างไม่ได้บนเครื่องนี้ (CI ไม่มีจอภาพแบบโต้ตอบ)");
+            throw new SkipException("WinForms handle สร้างไม่ได้บนเครื่องนี้ (CI ไม่มีจอภาพแบบโต้ตอบ)");
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public class MainFormPreviewTests
             Assert.Equal(6, count);
         }))
         {
-            global::Xunit.Assert.Skip("WinForms handle สร้างไม่ได้บนเครื่องนี้ (CI ไม่มีจอภาพแบบโต้ตอบ) — ทดสอบด้วยตนเองบน Windows");
+            throw new SkipException("WinForms handle สร้างไม่ได้บนเครื่องนี้ (CI ไม่มีจอภาพแบบโต้ตอบ) — ทดสอบด้วยตนเองบน Windows");
         }
     }
 }
