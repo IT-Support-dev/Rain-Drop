@@ -44,6 +44,10 @@ internal sealed class MainForm : Form
         Theme.ConfigureForm(this, new Size(900, 600));
         UiWindowPlacement.Attach(this, "master", new Size(1400, 860), new Size(900, 600));
 
+        // ต้องสร้าง _panel ก่อน AddMockTiles() เพราะการ์ดตัวอย่างต้องถูกเพิ่มลง _panel
+        _panel = new UiFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.ZoneContent };
+        ApplyDarkScrollbars(_panel);
+
         if (_uiPreview)
         {
             // โหมดตัวอย่าง: ไม่เขียนตั้งค่า ไม่เชื่อมต่อเครือข่าย ใช้ข้อมูลจำลอง
@@ -67,9 +71,6 @@ internal sealed class MainForm : Form
             foreach (var host in _settings.Hosts)
                 AddTile(host);
         }
-
-        _panel = new UiFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.ZoneContent };
-        ApplyDarkScrollbars(_panel);
 
         var content = BuildContent();
         content.TabIndex = 1;
@@ -294,25 +295,24 @@ internal sealed class MainForm : Form
         Sep();
 
         Group("พลังงาน");
-        var powerMenu = new ContextMenuStrip();
-        Theme.StyleMenu(powerMenu);
         var shutdown = new UiButton("ปิดเครื่อง", ButtonKind.Danger, UiIcon.Power)
         {
             Width = Theme.ButtonHeightLarge,
             Height = Theme.ButtonHeightLarge,
-            ContextMenuStrip = powerMenu,
         };
         Theme.SetToolTip(shutdown, "ปิดเครื่อง / รีสตาร์ท / ออกจากระบบ");
-        powerMenu.Items.Add("ปิดเครื่อง", null, (_, _) => Power(PowerAction.Shutdown, "ปิดเครื่อง"));
-        powerMenu.Items.Add("รีสตาร์ท", null, (_, _) => Power(PowerAction.Restart, "รีสตาร์ท"));
-        powerMenu.Items.Add("ออกจากระบบ", null, (_, _) => Power(PowerAction.Logoff, "ออกจากระบบ"));
-        powerMenu.Closed += (_, _) => powerMenu.Dispose();
+        // สร้าง ContextMenuStrip ใหม่ทุกครั้งที่คลิก ป้องกัน ObjectDisposedException
+        // จากการ dispose เมนูเก่าแล้วนำกลับมาใช้ซ้ำ
         shutdown.MouseDown += (_, e) =>
         {
-            if (e.Button == MouseButtons.Left)
-            {
-                powerMenu.Show(shutdown, new Point(0, shutdown.Height));
-            }
+            if (e.Button != MouseButtons.Left) return;
+            var menu = new ContextMenuStrip();
+            Theme.StyleMenu(menu);
+            menu.Items.Add("ปิดเครื่อง", null, (_, _) => Power(PowerAction.Shutdown, "ปิดเครื่อง"));
+            menu.Items.Add("รีสตาร์ท", null, (_, _) => Power(PowerAction.Restart, "รีสตาร์ท"));
+            menu.Items.Add("ออกจากระบบ", null, (_, _) => Power(PowerAction.Logoff, "ออกจากระบบ"));
+            menu.Closed += (_, _) => menu.Dispose();
+            menu.Show(shutdown, new Point(0, shutdown.Height));
         };
         var powerContainer = new FlowLayoutPanel
         {
