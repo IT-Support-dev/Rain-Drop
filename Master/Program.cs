@@ -85,6 +85,7 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new MainForm());
         return 0;
+    }
 
     private static void ShowFatalDialog(Exception ex)
     {
@@ -104,7 +105,6 @@ internal static class Program
         {
             // ถ้าแสดงกล่องข้อความไม่ได้ ก็ปล่อยให้ปิดเงียบ ๆ ตามเดิม
         }
-    }
     }
 }
 
