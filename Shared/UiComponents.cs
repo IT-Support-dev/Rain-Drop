@@ -221,7 +221,7 @@ internal static class UiInput
     {
         private bool _showPlaceholder;
 
-        public override string PlaceholderText
+        public override string? PlaceholderText
         {
             get => base.PlaceholderText;
             set { base.PlaceholderText = value; UpdatePlaceholder(); Invalidate(); }
@@ -254,7 +254,7 @@ internal static class UiInput
 
         private void UpdatePlaceholder()
         {
-            _showPlaceholder = string.IsNullOrEmpty(Text) && !Focused && !string.IsNullOrEmpty(base.PlaceholderText);
+            _showPlaceholder = string.IsNullOrEmpty(Text) && !Focused && !string.IsNullOrEmpty(PlaceholderText);
         }
 
         protected override void OnPaint(PaintEventArgs e)
