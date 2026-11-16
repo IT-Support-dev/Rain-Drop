@@ -49,7 +49,7 @@ public static class Diag
                 if (info.Exists && info.Length > MaxBytes) return;
 
                 string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{level}] {area}: {message}" +
-                              (ex is null ? "" : $" | {ex.GetType().Name}: {ex.Message}");
+                              (ex is null ? "" : $" | {ex}");
 
                 using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
                 using var writer = new StreamWriter(fs, new UTF8Encoding(false));
