@@ -46,6 +46,10 @@ internal static class Theme
     internal static readonly Color Online = Color.FromArgb(74, 222, 128);    // เขียว
     internal static readonly Color Waiting = Color.FromArgb(251, 191, 36);   // เหลือง
     internal static readonly Color Danger = Color.FromArgb(248, 113, 113);   // แดง
+    internal static readonly Color DangerBackground = Color.FromArgb(153, 27, 27);
+    internal static readonly Color DangerHover = Color.FromArgb(185, 28, 28);
+    internal static readonly Color DangerPressed = Mix(DangerBackground, Color.Black, 0.2);
+    internal const double BadgeBackgroundMix = 0.95;
     internal static readonly Color Offline = Color.FromArgb(148, 155, 164);   // เทา
     internal static readonly Color Link = Color.FromArgb(59, 130, 246);
     internal static readonly Color ChatBubbleMine = Mix(Accent, Surface, 0.65);
