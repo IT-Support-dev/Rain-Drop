@@ -4,6 +4,8 @@ namespace RainDrop.Shared;
 
 internal enum ButtonKind { Primary, Secondary, Danger, Ghost }
 
+/// <summary>ปุ่มสไตล์ Swiss/Minimal: เหลี่ยม ไม่มีมุมมน ไม่มีกรอบซ้อน
+/// ปุ่มหลักเป็นสีเน้น (Accent) ปุ่มรองเป็นข้อความล้วน ไอคอน+ข้อความอยู่บรรทัดเดียวกัน</summary>
 internal sealed class UiButton : Button
 {
     private ButtonKind _kind;
@@ -14,16 +16,18 @@ internal sealed class UiButton : Button
         _kind = kind;
         IconKind = icon;
         Text = text;
-        Font = Theme.FontBodyStrong;
+        Font = Theme.FontBody;
         Height = Theme.ButtonHeight;
         AutoSize = false;
         FlatStyle = FlatStyle.Flat;
         Cursor = Cursors.Hand;
         TabStop = true;
-        Padding = new Padding(Theme.Space3, 0, Theme.Space3, 0);
+        Padding = new Padding(Theme.Space2, 0, Theme.Space2, 0);
         Margin = new Padding(Theme.Space1);
         FlatAppearance.BorderSize = 0;
         ApplyColors();
+
+        // ไอคอนอยู่ข้างข้อความในบรรทัดเดียวกัน (Phase U3: ไม่มีข้อความใต้ไอคอน)
         if (icon != UiIcon.None)
         {
             Image = UiIcons.Get(icon, ForeColor, Theme.IconSize);
@@ -36,11 +40,10 @@ internal sealed class UiButton : Button
                 ImageAlign = ContentAlignment.MiddleCenter;
             }
         }
+
         MouseEnter += (_, _) => { _hover = true; ApplyColors(); };
         MouseLeave += (_, _) => { _hover = false; ApplyColors(); };
         EnabledChanged += (_, _) => ApplyColors();
-        Resize += (_, _) => ApplyRegion();
-        ApplyRegion();
     }
 
     private void ApplyColors()
@@ -53,8 +56,8 @@ internal sealed class UiButton : Button
                 FlatAppearance.MouseDownBackColor = Theme.AccentPressed;
                 break;
             case ButtonKind.Danger:
-                back = Theme.DangerBackground; fore = Theme.OnAccent; hover = Theme.DangerHover;
-                FlatAppearance.MouseDownBackColor = Theme.DangerPressed;
+                back = Theme.Danger; fore = Theme.OnAccent; hover = Color.FromArgb(239, 68, 68);
+                FlatAppearance.MouseDownBackColor = Color.FromArgb(192, 38, 38);
                 break;
             case ButtonKind.Ghost:
                 back = Color.Transparent; fore = Theme.TextSecondary; hover = Theme.SurfaceHover;
@@ -74,17 +77,10 @@ internal sealed class UiButton : Button
     internal UiIcon IconKind { get; set; }
     internal ButtonKind Kind { get => _kind; set { _kind = value; ApplyColors(); } }
 
-    private void ApplyRegion()
-    {
-        using var path = Theme.RoundedRect(new Rectangle(0, 0, Width, Height), Theme.RadiusSmall);
-        Region = new Region(path);
-    }
-
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        // ลบ focus rectangle สีขาวที่ติดปุ่มตามคำแนะนำจากภาพจริง;
-        // การชี้ชัดโฟกัสทำผ่านสีพื้น hover/pressed แทน
+        // Phase U3: ไม่มี focus rectangle — ขีดชัดโฟกัสทำผ่านสีพื้น hover/pressed
     }
     protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
     protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
@@ -95,38 +91,7 @@ internal sealed class UiButton : Button
     }
 }
 
-internal sealed class UiCard : Panel
-{
-    internal UiCard()
-    {
-        BackColor = Theme.Surface;
-        Padding = new Padding(Theme.Space4);
-        Margin = new Padding(Theme.Space2);
-        DoubleBuffered = true;
-        Resize += (_, _) => ApplyRegion();
-        ApplyRegion();
-    }
-    private void ApplyRegion()
-    {
-        using var path = Theme.RoundedRect(new Rectangle(0, 0, Width, Height), Theme.RadiusMedium);
-        Region = new Region(path);
-    }
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = Theme.RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), Theme.RadiusMedium);
-        e.Graphics.DrawPath(Theme.Pen(Theme.Border), path);
-    }
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing) Region = null;
-        base.Dispose(disposing);
-    }
-}
-
-internal enum StatusKind { Online, Waiting, Error, Offline }
-
+/// <summary>สถานะเครื่องสไตล์ Swiss: จุดสี 8px + ข้อความ เท่านั้น ไม่ใช้พื้นหลังแถบสี</summary>
 internal sealed class StatusBadge : Control
 {
     private StatusKind _kind;
@@ -134,8 +99,7 @@ internal sealed class StatusBadge : Control
     internal StatusBadge(StatusKind kind, string text)
     {
         _kind = kind; _text = text;
-        Height = Theme.Space5;
-        Font = Theme.FontCaptionStrong;
+        Font = Theme.FontCaption;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         UpdateSize();
     }
@@ -146,7 +110,7 @@ internal sealed class StatusBadge : Control
     }
     private void UpdateSize()
     {
-        Width = TextRenderer.MeasureText(_text, Font).Width + Theme.Space5;
+        Width = Theme.Space1 + Theme.Space1 + TextRenderer.MeasureText(_text, Font).Width; // จุด 8px + เว้น 8px + ข้อความ
         AccessibleName = _text;
     }
     protected override void OnPaint(PaintEventArgs e)
@@ -158,14 +122,15 @@ internal sealed class StatusBadge : Control
             StatusKind.Error => Theme.Danger,
             _ => Theme.Offline,
         };
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = Theme.RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), Theme.RadiusSmall);
-        e.Graphics.FillPath(Theme.Brush(Theme.Mix(color, Theme.Surface, Theme.BadgeBackgroundMix)), path);
-        e.Graphics.FillEllipse(Theme.Brush(color), Theme.Space2, Height / 2 - 3, 6, 6);
-        TextRenderer.DrawText(e.Graphics, _text, Font, new Rectangle(Theme.Space4, 0, Width - Theme.Space4, Height), color,
-            TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+        // วาดจุดสี 8px ด้านซ้าย
+        e.Graphics.FillEllipse(Theme.Brush(color), 0, (Height - Theme.Space1) / 2, Theme.Space1, Theme.Space1);
+        // ข้อความสถานะถัดจากจุด
+        TextRenderer.DrawText(e.Graphics, _text, Font, new Rectangle(Theme.Space1, 0, Width - Theme.Space1, Height),
+            color, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
     }
 }
+
+internal enum StatusKind { Online, Waiting, Error, Offline }
 
 internal static class UiInput
 {
@@ -177,23 +142,22 @@ internal static class UiInput
         return box;
     }
 
-    /// <summary>ช่องค้นหาพร้อมไอคอนแว่นขยายฝั่งซ้ายและ placeholder สีจาง</summary>
+    /// <summary>ช่องค้นหาแบบขีดใต้อย่างเดียว (underline input)
+    /// placeholder "ค้นหาเครื่อง" ไอคอนแว่น 16px ซ้าย ไม่มีพื้นหลังขอบกล่อง</summary>
     internal static Panel SearchBox(string placeholder, Action<string>? onTextChanged = null)
     {
         var container = new Panel
         {
             Height = Theme.InputHeight,
-            BackColor = Theme.InputBackground,
+            BackColor = Color.Transparent,
         };
-        using var iconPath = Theme.RoundedRect(new Rectangle(0, 0, Theme.InputHeight, Theme.InputHeight), Theme.RadiusSmall);
-        container.Region = new Region(iconPath);
 
         var icon = new PictureBox
         {
             Image = UiIcons.Get(UiIcon.Monitor, Theme.PlaceholderText, Theme.IconSize),
             Size = new Size(Theme.IconSize, Theme.IconSize),
             SizeMode = PictureBoxSizeMode.Zoom,
-            Location = new Point(Theme.Space2, (Theme.InputHeight - Theme.IconSize) / 2),
+            Location = new Point(0, (Theme.InputHeight - Theme.IconSize) / 2),
             BackColor = Color.Transparent,
         };
 
@@ -201,19 +165,28 @@ internal static class UiInput
         {
             Watermark = placeholder,
             BorderStyle = BorderStyle.None,
-            BackColor = Theme.InputBackground,
+            BackColor = Color.Transparent,
             ForeColor = Theme.TextPrimary,
             Font = Theme.FontBody,
-            Location = new Point(Theme.InputHeight + Theme.Space2, 0),
+            Location = new Point(Theme.IconSize + Theme.Space1, 0),
             Size = new Size(200, Theme.InputHeight),
             Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom,
         };
-        box.GotFocus += (_, _) => box.BackColor = Theme.Surface;
-        box.LostFocus += (_, _) => box.BackColor = Theme.InputBackground;
+        box.GotFocus += (_, _) => box.ForeColor = Theme.TextPrimary;
+        box.LostFocus += (_, _) => box.ForeColor = Theme.TextPrimary;
         if (onTextChanged is not null) box.TextChanged += (_, _) => onTextChanged(box.Text);
+
+        // เส้นขีดใต้ 1px สีจาง
+        var underline = new Panel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 1,
+            BackColor = Theme.Border,
+        };
 
         container.Controls.Add(box);
         container.Controls.Add(icon);
+        container.Controls.Add(underline);
         return container;
     }
 
@@ -222,7 +195,6 @@ internal static class UiInput
         private string? _placeholder;
         private bool _showPlaceholder;
 
-        /// <summary>ข้อความตัวอย่างที่แสดงเมื่อช่องว่างและไม่มีโฟกัส (แยกจาก TextBox.PlaceholderText ของ .NET เพื่อหลีกเลี่ยงความขัดแย้งเรื่อง nullability)</summary>
         public string? Watermark
         {
             get => _placeholder;
@@ -265,14 +237,15 @@ internal static class UiInput
             if (_showPlaceholder)
             {
                 TextRenderer.DrawText(e.Graphics, _placeholder!, Font,
-                    new Rectangle(Theme.Space2, 0, Width - Theme.Space4, Height),
+                    new Rectangle(Theme.Space1, 0, Width - Theme.Space2, Height),
                     Theme.PlaceholderText, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
             }
         }
     }
 }
 
-/// <summary>ปุ่มทรีสต์สำหรับกรองสถานะ: ทั้งหมด / ออนไลน์ / ออฟไลน์ สลับเลือกได้อันเดียว</summary>
+/// <summary>ตัวกรองสถานะเป็นข้อความ tab (ไม่ใช่ chip): ทั้งหมด / ออนไลน์ / ออฟไลน์
+/// ตัวที่เลือกมีขีดเส้นใต้สีเน้น ข้อความต้องไม่ถูกตัด</summary>
 internal sealed class UiSegmentedFilter : FlowLayoutPanel
 {
     private readonly List<UiButton> _buttons = new();
@@ -294,11 +267,12 @@ internal sealed class UiSegmentedFilter : FlowLayoutPanel
         _selectedIndex = selectedIndex;
         foreach (var (label, i) in labels.Select((l, idx) => (l, idx)))
         {
-            var b = new UiButton(label, ButtonKind.Secondary)
+            var b = new UiButton(label, ButtonKind.Ghost)
             {
                 Height = Theme.ButtonHeight,
-                Margin = new Padding(0, 0, Theme.Space1, 0),
+                Margin = new Padding(0, 0, Theme.Space2, 0),
                 TabIndex = i,
+                Padding = new Padding(Theme.Space2, 0, Theme.Space2, 0),
             };
             b.Click += (_, _) => { SelectedIndex = i; SelectionChanged?.Invoke(this, i); };
             _buttons.Add(b);
@@ -313,13 +287,13 @@ internal sealed class UiSegmentedFilter : FlowLayoutPanel
         {
             var b = _buttons[i];
             bool sel = i == _selectedIndex;
-            b.Kind = sel ? ButtonKind.Primary : ButtonKind.Secondary;
-            b.ForeColor = sel ? Theme.OnAccent : Theme.TextSecondary;
+            b.ForeColor = sel ? Theme.Accent : Theme.TextSecondary;
+            b.Font = sel ? Theme.FontBodyStrong : Theme.FontBody;
         }
     }
 }
 
-/// <summary>รายการเมนูแถบซ้ายแบบเดียวกันทุกแถว: ไอคอนชิดซ้ายเท่ากัน ข้อความน้ำหนักปกติ โฮเวอร์เต็มความกว้าง</summary>
+/// <summary>รายการแถบซ้าย: ไอคอนชิดซ้าย ข้อความน้ำหนักปกติ โฮเวอร์เต็มความกว้าง</summary>
 internal sealed class UiSidebarItem : Panel
 {
     private readonly Label _label;
@@ -337,16 +311,16 @@ internal sealed class UiSidebarItem : Panel
             Image = UiIcons.Get(icon, Theme.TextSecondary, Theme.IconSizeLarge),
             Size = new Size(Theme.IconSizeLarge, Theme.IconSizeLarge),
             SizeMode = PictureBoxSizeMode.Zoom,
-            Location = new Point(Theme.Space2, (Theme.ButtonHeightLarge - Theme.IconSizeLarge) / 2),
+            Location = new Point(Theme.Space1, (Theme.ButtonHeightLarge - Theme.IconSizeLarge) / 2),
             BackColor = Color.Transparent,
         };
 
         _label = new Label
         {
             Text = text,
-            Font = Theme.FontBody, // น้ำหนักปกติ ไม่ใช่ตัวหนา
+            Font = Theme.FontBody,
             ForeColor = Theme.TextSecondary,
-            Location = new Point(Theme.InputHeight + Theme.Space3, 0),
+            Location = new Point(Theme.IconSizeLarge + Theme.Space2, 0),
             AutoSize = false,
             Height = Theme.ButtonHeightLarge,
             TextAlign = ContentAlignment.MiddleLeft,
