@@ -140,7 +140,7 @@ internal sealed class HostTile : UserControl, ITile
         var statusRow = new Panel
         {
             Dock = DockStyle.Top,
-            Height = Theme.Space1,
+            Height = Theme.Space3, // เดิม 8px ทำให้ข้อความสถานะโดนตัดครึ่งแนวตั้ง ต้องสูงพอสำหรับตัวอักษร 9.5pt
             BackColor = Color.Transparent,
         };
         _badge = new StatusBadge(StatusKind.Waiting, "รอเชื่อมต่อ")
@@ -396,7 +396,8 @@ internal sealed class PreviewHostTile : UserControl, ITile
             SizeMode = PictureBoxSizeMode.Zoom,
             BackColor = Theme.Surface,
         };
-        _pic.Image = UiIcons.Get(UiIcon.Computer, Theme.TextDisabled, Theme.IconSize);
+        // ไม่ตั้ง _pic.Image ให้แสดงข้อความ "ไม่มีภาพ" เหมือน HostTile จริง
+        // (เดิมใส่ไอคอน 16px แล้ว PictureBox Zoom ยืดจนเบลอเต็มการ์ด)
         _pic.Paint += (_, e) =>
         {
             if (_pic.Image is null)
@@ -425,7 +426,7 @@ internal sealed class PreviewHostTile : UserControl, ITile
         var statusRow = new Panel
         {
             Dock = DockStyle.Top,
-            Height = Theme.Space1,
+            Height = Theme.Space3, // เดิม 8px ทำให้ข้อความสถานะโดนตัดครึ่งแนวตั้ง ต้องสูงพอสำหรับตัวอักษร 9.5pt
             BackColor = Color.Transparent,
         };
         var statusText = kind switch

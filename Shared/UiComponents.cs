@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 
 namespace RainDrop.Shared;
 
@@ -112,7 +113,8 @@ internal sealed class StatusBadge : Control
     {
         _kind = kind; _text = text;
         Font = Theme.FontCaption;
-        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+        BackColor = Color.Transparent; // เดิมเป็นพื้นเทา default ทับพื้นการ์ด
         UpdateSize();
     }
     internal void Set(StatusKind kind, string text)
@@ -166,7 +168,7 @@ internal static class UiInput
 
         var icon = new PictureBox
         {
-            Image = UiIcons.Get(UiIcon.Monitor, Theme.PlaceholderText, Theme.IconSize),
+            Image = UiIcons.Get(UiIcon.Search, Theme.PlaceholderText, Theme.IconSize),
             Size = new Size(Theme.IconSize, Theme.IconSize),
             SizeMode = PictureBoxSizeMode.Zoom,
             Location = new Point(0, (Theme.InputHeight - Theme.IconSize) / 2),
@@ -177,7 +179,8 @@ internal static class UiInput
         {
             Watermark = placeholder,
             BorderStyle = BorderStyle.None,
-            BackColor = Color.Transparent,
+            // TextBox ใส่ Color.Transparent ไม่ได้ (ArgumentException ตอนรันไทม์) ใช้สีพื้น sidebar แทน
+            BackColor = Theme.Surface,
             ForeColor = Theme.TextPrimary,
             Font = Theme.FontBody,
             Location = new Point(Theme.IconSize + Theme.Space1, 0),
@@ -216,7 +219,14 @@ internal static class UiInput
         {
             base.OnHandleCreated(e);
             UpdatePlaceholder();
+            // TextBox ไม่เรียก OnPaint (UserPaint ปิดอยู่) จึงต้องใช้ EM_SETCUEBANNER ของ Windows
+            // แสดง placeholder แทน ไม่งั้นช่องค้นหาจะว่างเปล่าไม่มีคำใบ้
+            if (_placeholder is { Length: > 0 } && !Multiline)
+                SendMessageCue(Handle, 0x1501 /* EM_SETCUEBANNER */, (IntPtr)1, _placeholder);
         }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
+        private static extern IntPtr SendMessageCue(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
 
         protected override void OnTextChanged(EventArgs e)
         {
@@ -259,7 +269,7 @@ internal static class UiInput
 /// ตัวที่เลือกมีขีดเส้นใต้ 2px สีดำ ข้อความต้องไม่ถูกตัด</summary>
 internal sealed class UiSegmentedFilter : FlowLayoutPanel
 {
-    private readonly List<Label> _labels = new();
+    private readonly List<FilterTabLabel> _labels = new();
     private int _selectedIndex;
 
     public int SelectedIndex
@@ -278,13 +288,14 @@ internal sealed class UiSegmentedFilter : FlowLayoutPanel
         _selectedIndex = selectedIndex;
         foreach (var (label, i) in labels.Select((l, idx) => (l, idx)))
         {
-            var lbl = new Label
+            var lbl = new FilterTabLabel
             {
                 Text = label,
                 Font = Theme.FontBody,
                 ForeColor = Theme.TextSecondary,
                 AutoSize = true,
                 Margin = new Padding(0, 0, Theme.Space2, 0),
+                Padding = new Padding(0, 0, 0, 4), // เว้นให้เส้นใต้ 2px ไม่ทับตัวอักษร
                 Cursor = Cursors.Hand,
                 Tag = i,
             };
@@ -305,6 +316,20 @@ internal sealed class UiSegmentedFilter : FlowLayoutPanel
             bool sel = i == _selectedIndex;
             lbl.ForeColor = sel ? Theme.TextPrimary : Theme.TextSecondary;
             lbl.Font = sel ? Theme.FontBodyStrong : Theme.FontBody;
+            lbl.Underlined = sel;
+            lbl.Invalidate();
+        }
+    }
+
+    // แท็บที่เลือกมีขีดเส้นใต้ 2px สีดำตาม spec (Label เป็น UserPaint จึงวาดทับตัวเองได้ตรง ๆ)
+    private sealed class FilterTabLabel : Label
+    {
+        internal bool Underlined { get; set; }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (Underlined)
+                e.Graphics.DrawLine(Theme.Pen(Theme.TextPrimary, 2F), 0, Height - 1, Width, Height - 1);
         }
     }
 }

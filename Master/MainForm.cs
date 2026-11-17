@@ -73,11 +73,15 @@ internal sealed class MainForm : Form
 
         var sidebar = BuildSidebar();
         sidebar.TabIndex = 0;
-        Controls.Add(sidebar);
 
         var content = BuildContent();
         content.TabIndex = 1;
+
+        // ต้องเพิ่ม content ก่อน sidebar — WinForms จัด Dock จาก control ที่ add ท้ายสุดก่อน
+        // ถ้า add sidebar ก่อน content (Dock=Fill) จะยืดเต็มหน้าต่างแล้วถูก sidebar ทับด้านซ้าย 260px
+        // ทำให้ปุ่มซ้ายสุดของ toolbar และข้อความแถบสถานะโดนซ่อนใต้แถบซ้าย
         Controls.Add(content);
+        Controls.Add(sidebar);
 
         ApplyFilter();
 
@@ -157,6 +161,8 @@ internal sealed class MainForm : Form
 
         // ตัวกรองสถานะ: ข้อความ tab "ทั้งหมด · ออนไลน์ · ออฟไลน์" ขีดเส้นใต้ 2px ตัวที่เลือก
         var filter = new UiSegmentedFilter(new[] { "ทั้งหมด", "ออนไลน์", "ออฟไลน์" }, 0);
+        // ต้อง Dock=Top ไม่งั้นลอยที่ (0,0) ทับโลโก้ "Rain Drop" และช่องค้นหา
+        filter.Dock = DockStyle.Top;
         filter.SelectionChanged += (_, i) => { _statusFilter = (MachineStatusFilter)i; ApplyFilter(); };
 
         _count.Dock = DockStyle.Top;
@@ -205,7 +211,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Top,
             Height = Theme.ToolbarHeight,
-            Padding = new Padding(Theme.Space3, Theme.Space1, Theme.Space3, Theme.Space1),
+            Padding = new Padding(Theme.Space1),
             BackColor = Theme.ZoneHeader,
             WrapContents = false,
             AutoScroll = false,
@@ -217,7 +223,10 @@ internal sealed class MainForm : Form
             {
                 Height = Theme.ButtonHeight,
                 AutoSize = true,        // ให้ปุ่มขยายตามข้อความไทย ไม่ตัดข้อความ
-                Margin = new Padding(0, 0, Theme.Space3, 0),
+                // ระยะรายปุ่มแบบ Space3 รวมทั้งแถวไม่พอ (11 ปุ่ม + 4 เส้นแบ่ง ≈ 1,590px > พื้นที่ ~1,119px)
+                // จึงใช้ padding/margin 8/6px เพื่อให้ปุ่มแถวท้าย ("เพิ่มเติม"/"พลังงาน") แสดงครบไม่โดนตัดขอบขวา
+                Padding = new Padding(Theme.Space1, 0, Theme.Space1, 0),
+                Margin = new Padding(0, 0, 6, 0),
                 UseMnemonic = false,
             };
             Theme.SetToolTip(b, tip);
@@ -230,7 +239,7 @@ internal sealed class MainForm : Form
             Width = 1,
             Height = Theme.ButtonHeight,
             BackColor = Theme.Divider,
-            Margin = new Padding(Theme.Space3, Theme.Space1, Theme.Space3, Theme.Space1),
+            Margin = new Padding(Theme.Space1),
         });
 
         Tool(UiIcon.Refresh, "ค้นหา", "ค้นหาเครื่องในเครือข่าย", () => _ = DiscoverAsync(userInitiated: true));
@@ -256,7 +265,8 @@ internal sealed class MainForm : Form
         {
             Height = Theme.ButtonHeight,
             AutoSize = true,
-            Margin = new Padding(0, 0, Theme.Space3, 0),
+            Padding = new Padding(Theme.Space1, 0, Theme.Space1, 0),
+            Margin = new Padding(0, 0, 6, 0),
             UseMnemonic = false,
         };
         Theme.SetToolTip(shutdown, "ปิดเครื่อง / รีสตาร์ท / ออกจากระบบ");
@@ -276,9 +286,18 @@ internal sealed class MainForm : Form
         // ---------- พื้นที่แสดงการ์ดเครื่อง ----------
         _panel.Padding = new Padding(Theme.Space3);
 
-        // ---------- Empty state: หัวเรื่อง Light ขนาดใหญ่ ชิดซ้ายตามกริด ----------
+        // ---------- Empty state: หัวเรื่อง Light ขนาดใหญ่ จัดกึ่งกลางพื้นที่แสดงผล ----------
         _empty = new Panel { Dock = DockStyle.Fill, BackColor = Theme.ZoneContent };
-        var emptyContainer = new Panel { AutoSize = true, BackColor = Color.Transparent };
+        // เดิมเป็น Panel ธรรมดา ทำให้หัวเรื่อง/คำอธิบาย/ปุ่มวางซ้อนกันที่ (0,0) เดียวกัน
+        // ใช้ FlowLayoutPanel เรียงลงล่างแทน เพื่อให้แต่ละชิ้นอยู่แถวของตัวเอง
+        var emptyContainer = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Color.Transparent,
+        };
         var emptyHeading = new Label
         {
             Text = "ยังไม่มีเครื่อง",
@@ -331,10 +350,14 @@ internal sealed class MainForm : Form
 
         var emptyCenter = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
         emptyCenter.Controls.Add(emptyContainer);
-        emptyCenter.Resize += (_, _) =>
+        void CenterEmptyContainer()
         {
-            emptyContainer.Location = new Point(Theme.Space3, Theme.Space3);
-        };
+            emptyContainer.Location = new Point(
+                Math.Max(Theme.Space3, (emptyCenter.Width - emptyContainer.Width) / 2),
+                Math.Max(Theme.Space3, (emptyCenter.Height - emptyContainer.Height) / 2));
+        }
+        emptyCenter.Resize += (_, _) => CenterEmptyContainer();
+        emptyContainer.SizeChanged += (_, _) => CenterEmptyContainer();
         _empty.Controls.Add(emptyCenter);
 
         // ---------- แถบสถานะ: ข้อความ 9.5pt สีรอง เส้นบน 1px ----------
