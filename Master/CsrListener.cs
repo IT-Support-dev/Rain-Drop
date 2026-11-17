@@ -30,8 +30,8 @@ internal sealed class CsrListener : IDisposable
     private readonly X509Certificate2 _masterTempCert;
     private readonly Socket _listenSocket;
     private readonly object _gate = new();
-    private Task? _acceptLoop;
-    private CancellationTokenSource? _cts;
+    private Task _acceptLoop;
+    private CancellationTokenSource _cts;
     private bool _running;
 
     // per-IP failure table with hard size cap (requirement 4)
