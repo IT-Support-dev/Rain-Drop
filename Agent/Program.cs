@@ -12,13 +12,13 @@ namespace RainDrop.Agent;
 internal static class Program
 {
     [STAThread]
-    private static int Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         // C2b enrollment: pairing code อ่านจาก stdin (ไม่ส่งผ่าน command line กันหลุดลง log)
         //   RainDrop.Agent.exe --enroll-pairing <folder> <master-host:port>
         if (args.Length >= 3 && args[0] == "--enroll-pairing")
         {
-            if (EnrollmentClient.Run(args[1], args[2], out string enrollError)) return 0;
+            if (await EnrollmentClient.Run(args[1], args[2], out string enrollError)) return 0;
             Console.Error.WriteLine("enroll-pairing ไม่สำเร็จ: " + enrollError);
             return 1;
         }

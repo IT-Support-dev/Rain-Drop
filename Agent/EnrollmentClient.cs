@@ -1,9 +1,10 @@
+using System.IO;
+using System.Net;
 using System.Net.Security;
+using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.IO;
-using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using RainDrop.Shared;
@@ -14,17 +15,17 @@ namespace RainDrop.Agent;
 internal static class EnrollmentClient
 {
     /// <summary>รัน enrollment แบบ pairing code: อ่านรหัสจาก stdin แล้วเชื่อมต่อ Master พอร์ตแยก</summary>
-    public static bool Run(string folder, string masterAddress, out string error)
+    public static async Task<bool> Run(string folder, string masterAddress, out string error)
     {
         error = "";
         try
         {
             // --- อ่านรหัสจาก stdin (บรรทัดเดียว) ไม่รับจาก argument กันหลุดลง log ---
-            string? codeLine = Console.In.ReadLine();
+            string? codeLine = await Console.In.ReadLineAsync();
             string code = codeLine?.Trim() ?? "";
             if (string.IsNullOrEmpty(code))
             {
-                // Fallback: environment variable of the child process only (not command line, not installer log)
+                // Fallback: environment variable ของโปรเซสลูกเท่านั้น (ไม่ใช่ command line, ไม่ใช่ installer log)
                 code = Environment.GetEnvironmentVariable("RAINDROP_PAIRING_CODE")?.Trim() ?? "";
             }
             if (string.IsNullOrEmpty(code))
@@ -39,11 +40,10 @@ internal static class EnrollmentClient
 
             // --- สร้างคู่กุญแจ P-256 บนเครื่องก่อน (private key ไม่เคยออกจากเครื่องนี้) ---
             using var agentKey = ECDsa.Create(ECCurve.CreateNamedCurve(ECCurve.NamedCurves.nistP256));
-            var csrReq = BuildCsr(agentKey, Environment.MachineName, new[] { host });
 
             // --- เชื่อมต่อ Master พอร์ต enrollment ด้วย TLS (ไม่ pin CA, ต้องไม่ใช่ TLS เปล่าๆ) ---
-            using var tcp = new System.Net.Sockets.TcpClient();
-            tcp.Connect(host, enrollmentPort);
+            using var tcp = new TcpClient();
+            await tcp.ConnectAsync(host, enrollmentPort);
             using var ssl = new SslStream(tcp.GetStream(), false, ValidateServerCert);
             var clientOpts = new SslClientAuthenticationOptions
             {
@@ -53,7 +53,7 @@ internal static class EnrollmentClient
                 AllowTlsResume = false,
                 RemoteCertificateValidationCallback = (_, _, _, _) => true, // Agent ยังไม่มี CA ให้ pin
             };
-            await ssl.AuthenticateAsClientAsync(clientOpts).ConfigureAwait(false);
+            await ssl.AuthenticateAsClientAsync(clientOpts);
 
             // Channel binding: SHA-256 ของ public key ของ cert ที่ Master โชว์ใน TLS
             byte[] channelBinding;
@@ -72,7 +72,7 @@ internal static class EnrollmentClient
             await WriteLineAsync(ssl, codeLineOut);
 
             // --- รับ NONCE ---
-            string? nonceLine = await sr.ReadLineAsync();
+            string? nonceLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(nonceLine) || !nonceLine.StartsWith("NONCE ", StringComparison.Ordinal))
             {
                 error = "Master ไม่ตอบกลับ NONCE ที่ถูกต้อง";
@@ -90,7 +90,7 @@ internal static class EnrollmentClient
             await WriteLineAsync(ssl, agentLine);
 
             // --- รับ PROOF ของ Master และตรวจ ---
-            string? masterProofLine = await sr.ReadLineAsync();
+            string? masterProofLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(masterProofLine) || !masterProofLine.StartsWith("PROOF ", StringComparison.Ordinal))
             {
                 error = "Master ส่งพิสูจน์ตัวตนไม่ถูกต้อง";
@@ -108,21 +108,13 @@ internal static class EnrollmentClient
                 return false;
             }
 
-            // --- ส่ง CSR ---
-            byte[] csrDer;
-            using (var ms = new System.IO.MemoryStream())
-            {
-                csrReq.Export(ms);
-                csrDer = ms.ToArray();
-            }
-            await WriteLineAsync(ssl, $"CSR {Convert.ToBase64String(csrDer)}");
-
-            // ส่ง machine name และ public key SPKI แยกต่างหาก (Master ต้องการสร้าง CertificateRequest โดยไม่ต้องพาร์ส CSR)
+            // --- ส่ง machine name + public key SPKI (ไม่ต้องสร้าง CSR, Master セ็นใบรับรองจากกุญแจนี้) ---
             await WriteLineAsync(ssl, $"MACHINE {Environment.MachineName}");
-            await WriteLineAsync(ssl, $"PUBKEY {Convert.ToBase64String(agentKey.ExportSubjectPublicKeyInfo())}");
+            byte[] spki = agentKey.ExportSubjectPublicKeyInfo();
+            await WriteLineAsync(ssl, $"PUBKEY {Convert.ToBase64String(spki)}");
 
             // --- รับ ISSUED + CA ---
-            string? issuedLine = await sr.ReadLineAsync();
+            string? issuedLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(issuedLine) || !issuedLine.StartsWith("ISSUED ", StringComparison.Ordinal))
             {
                 error = "Master ไม่ออกใบรับรอง: " + issuedLine;
@@ -130,7 +122,7 @@ internal static class EnrollmentClient
             }
             byte[] agentCertDer = Convert.FromBase64String(issuedLine[7..].Trim());
 
-            string? caLine = await sr.ReadLineAsync();
+            string? caLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(caLine) || !caLine.StartsWith("CA ", StringComparison.Ordinal))
             {
                 error = "Master ไม่ส่ง CA public cert";
@@ -174,40 +166,9 @@ internal static class EnrollmentClient
         return (masterAddress, Protocol.DefaultPort);
     }
 
-    private static CertificateRequest BuildCsr(ECDsa key, string machineName, string[] addresses)
-    {
-        var subject = new X500DistinguishedName($"CN={machineName}");
-        var req = new CertificateRequest(subject, key, HashAlgorithmName.SHA256);
-
-        // SAN
-        var san = new SubjectAlternativeNameBuilder();
-        san.AddDnsName(machineName);
-        san.AddIpAddress(System.Net.IPAddress.Loopback);
-        san.AddIpAddress(System.Net.IPAddress.IPv6Loopback);
-        foreach (string address in addresses)
-        {
-            if (System.Net.IPAddress.TryParse(address, out var ip)) san.AddIpAddress(ip);
-            else san.AddDnsName(address);
-        }
-        req.CertificateExtensions.Add(san.Build());
-
-        // BasicConstraints: ไม่ใช่ CA, critical
-        req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
-        // KeyUsage: DigitalSignature, critical
-        req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
-        // EKU: ServerAuth, critical (control channel uses ServerAuth for AgentServer role)
-        req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
-            new OidCollection { new(RepoCertificates.ServerAuthOid) }, true));
-        // SKI
-        req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(key, false));
-
-        return req;
-    }
-
     private static bool ValidateServerCert(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
     {
         // Agent ยังไม่มี CA ของ Master ให้ pin — ยอมรับทุก cert แล้วพึ่ง channel binding แทน
-        // (ไม่ยอมให้ TLS เปล่าๆ ผ่านโดยไม่มีการผูกกับรหัส)
         return true;
     }
 
@@ -215,5 +176,10 @@ internal static class EnrollmentClient
     {
         var bytes = Encoding.UTF8.GetBytes(text + "\n");
         await s.WriteAsync(bytes, 0, bytes.Length);
+    }
+
+    private static async Task<string> ReadLineAsync(StreamReader sr)
+    {
+        return await sr.ReadLineAsync() ?? "";
     }
 }
