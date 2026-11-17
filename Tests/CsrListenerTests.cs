@@ -115,17 +115,8 @@ public class CsrListenerTests : IDisposable
             new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, true));
 
         var result = RepoCertificates.ValidateCsr(req, "", "test");
-        // ขอ CA:true ต้องถูกปฏิเสธ (แม้ว่า ValidateCsr จะตรวจจาก CSR ที่ส่งมาไม่ใช่จาก CertificateRequest ที่สร้างใหม่)
-        // เนื่องจาก ValidateCsr รับ byte[] DER เราต้องแปลง
-        byte[] csrDer;
-        using (var ms = new System.IO.MemoryStream())
-        {
-            req.Export(ms);
-            csrDer = ms.ToArray();
-        }
-        var result2 = RepoCertificates.ValidateCsr(csrDer, "", "test");
-        Assert.False(result2.Valid);
-        Assert.Contains("ca-true-forbidden", result2.Reason);
+        Assert.False(result.Valid);
+        Assert.Contains("ca-true-forbidden", result.Reason);
     }
 
     [Fact]
