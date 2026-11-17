@@ -18,7 +18,8 @@ internal static class Program
         //   RainDrop.Agent.exe --enroll-pairing <folder> <master-host:port>
         if (args.Length >= 3 && args[0] == "--enroll-pairing")
         {
-            if (await EnrollmentClient.Run(args[1], args[2], out string enrollError)) return 0;
+            var (ok, enrollError) = await EnrollmentClient.Run(args[1], args[2]);
+            if (ok) return 0;
             Console.Error.WriteLine("enroll-pairing ไม่สำเร็จ: " + enrollError);
             return 1;
         }

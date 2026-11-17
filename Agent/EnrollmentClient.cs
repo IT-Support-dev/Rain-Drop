@@ -15,9 +15,9 @@ namespace RainDrop.Agent;
 internal static class EnrollmentClient
 {
     /// <summary>รัน enrollment แบบ pairing code: อ่านรหัสจาก stdin แล้วเชื่อมต่อ Master พอร์ตแยก</summary>
-    public static async Task<bool> Run(string folder, string masterAddress, out string error)
+    public static async Task<(bool Success, string Error)> Run(string folder, string masterAddress)
     {
-        error = "";
+        string error = "";
         try
         {
             // --- อ่านรหัสจาก stdin (บรรทัดเดียว) ไม่รับจาก argument กันหลุดลง log ---
@@ -30,8 +30,7 @@ internal static class EnrollmentClient
             }
             if (string.IsNullOrEmpty(code))
             {
-                error = "ไม่พบ pairing code ใน stdin หรือ environment variable RAINDROP_PAIRING_CODE (ส่งผ่าน stdin หรือ env ของโปรเซสลูกเท่านั้น ห้ามอยู่บน command line)";
-                return false;
+                return (false, "ไม่พบ pairing code ใน stdin หรือ environment variable RAINDROP_PAIRING_CODE (ส่งผ่าน stdin หรือ env ของโปรเซสลูกเท่านั้น ห้ามอยู่บน command line)");
             }
 
             // แยก host:port จาก master address
@@ -75,8 +74,7 @@ internal static class EnrollmentClient
             string? nonceLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(nonceLine) || !nonceLine.StartsWith("NONCE ", StringComparison.Ordinal))
             {
-                error = "Master ไม่ตอบกลับ NONCE ที่ถูกต้อง";
-                return false;
+                return (false, "Master ไม่ตอบกลับ NONCE ที่ถูกต้อง");
             }
             byte[] nonceM = Convert.FromHexString(nonceLine[6..].Trim());
 
@@ -93,8 +91,7 @@ internal static class EnrollmentClient
             string? masterProofLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(masterProofLine) || !masterProofLine.StartsWith("PROOF ", StringComparison.Ordinal))
             {
-                error = "Master ส่งพิสูจน์ตัวตนไม่ถูกต้อง";
-                return false;
+                return (false, "Master ส่งพิสูจน์ตัวตนไม่ถูกต้อง");
             }
             byte[] masterProof = Convert.FromHexString(masterProofLine[6..].Trim());
             byte[] masterTranscript = EnrollmentChannel.TranscriptHash(
@@ -104,8 +101,7 @@ internal static class EnrollmentClient
             byte[] expectedMaster = EnrollmentChannel.ComputeMasterProof(k, nonceM, nonceA, masterTranscript);
             if (!EnrollmentChannel.VerifyProof(expectedMaster, masterProof))
             {
-                error = "พิสูจน์ตัวตนของ Master ไม่ตรงกัน (อาจมี MITM)";
-                return false;
+                return (false, "พิสูจน์ตัวตนของ Master ไม่ตรงกัน (อาจมี MITM)");
             }
 
             // --- ส่ง machine name + public key SPKI (ไม่ต้องสร้าง CSR, Master セ็นใบรับรองจากกุญแจนี้) ---
@@ -117,16 +113,14 @@ internal static class EnrollmentClient
             string? issuedLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(issuedLine) || !issuedLine.StartsWith("ISSUED ", StringComparison.Ordinal))
             {
-                error = "Master ไม่ออกใบรับรอง: " + issuedLine;
-                return false;
+                return (false, "Master ไม่ออกใบรับรอง: " + issuedLine);
             }
             byte[] agentCertDer = Convert.FromBase64String(issuedLine[7..].Trim());
 
             string? caLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(caLine) || !caLine.StartsWith("CA ", StringComparison.Ordinal))
             {
-                error = "Master ไม่ส่ง CA public cert";
-                return false;
+                return (false, "Master ไม่ส่ง CA public cert");
             }
             byte[] caCertDer = Convert.FromBase64String(caLine[3..].Trim());
 
@@ -149,12 +143,11 @@ internal static class EnrollmentClient
             // รหัสไม่ถูกเก็บไว้ในเครื่องหลังจากนี้ — อ่านจาก stdin แล้วทิ้งไปทันที
             CryptographicOperations.ZeroMemory(k);
             Environment.SetEnvironmentVariable("RAINDROP_PAIRING_CODE", null);
-            return true;
+            return (true, "");
         }
         catch (Exception ex)
         {
-            error = ex.GetType().Name + ": " + ex.Message;
-            return false;
+            return (false, ex.GetType().Name + ": " + ex.Message);
         }
     }
 

@@ -196,8 +196,6 @@ internal sealed class MasterPki : IDisposable
         _ca.Dispose();
         _caKey.Dispose();
     }
-}
-
     /// <summary>เซ็น CSR ที่ Agent ส่งมา ผลัดใบรับรองใหม่ให้เครื่องลูก (ไม่มี private key ของ Agent หลุดออกจากเครื่องมัน)</summary>
     public X509Certificate2 SignAgentCsr(CertificateRequest csr, string machineId, string machineName,
         IEnumerable<string> addresses, out string serial, out DateTime notAfterUtc)
@@ -255,4 +253,5 @@ internal sealed class MasterPki : IDisposable
                 .ToList();
         }
     }
+}
 }
