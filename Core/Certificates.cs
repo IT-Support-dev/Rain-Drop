@@ -203,7 +203,7 @@ public static class RepoCertificates
         try
         {
             // ตรวจกุญแจต้องเป็น ECDSA P-256
-            if (request.PublicKey is not ECDsa ecdsa)
+            if (request.PublicKey is null || request.PublicKey.Key is not ECDsa ecdsa)
                 return new CsrValidationResult(false, "invalid-key-type-or-size");
             var parameters = ecdsa.ExportParameters(false);
             if (parameters.Curve.Oid?.Value != "1.2.840.10045.3.1.7") // P-256 / prime256v1
