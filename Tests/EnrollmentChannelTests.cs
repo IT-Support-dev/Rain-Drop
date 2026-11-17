@@ -94,7 +94,7 @@ public class EnrollmentChannelTests
     [Fact]
     public void DeriveChannelBindingFromCert_Deterministic()
     {
-        using var ecdsa = ECDsa.Create(ECCurve.CreateNamedCurve(ECCurve.NamedCurves.nistP256));
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         byte[] cb1 = EnrollmentChannel.DeriveChannelBindingFromCert(ecdsa);
         byte[] cb2 = EnrollmentChannel.DeriveChannelBindingFromCert(ecdsa);
         Assert.Equal(cb1, cb2);

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using RainDrop.Master;
 using RainDrop.Shared;
 using Xunit;
@@ -104,7 +105,7 @@ public class CsrListenerTests : IDisposable
     [Fact]
     public void ValidateCsr_CaTrue_Rejected()
     {
-        using var key = ECDsa.Create(ECCurve.CreateNamedCurve(ECCurve.NamedCurves.nistP256));
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var req = new CertificateRequest(
             new X500DistinguishedName("CN=test"),
             key, HashAlgorithmName.SHA256);
@@ -130,7 +131,7 @@ public class CsrListenerTests : IDisposable
     [Fact]
     public void ValidateCsr_WrongEku_Rejected()
     {
-        using var key = ECDsa.Create(ECCurve.CreateNamedCurve(ECCurve.NamedCurves.nistP256));
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var req = new CertificateRequest(
             new X500DistinguishedName("CN=test"),
             key, HashAlgorithmName.SHA256);
@@ -145,7 +146,7 @@ public class CsrListenerTests : IDisposable
     [Fact]
     public void ValidateCsr_ValidP256_Accepted()
     {
-        using var key = ECDsa.Create(ECCurve.CreateNamedCurve(ECCurve.NamedCurves.nistP256));
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var req = new CertificateRequest(
             new X500DistinguishedName("CN=test-machine"),
             key, HashAlgorithmName.SHA256);
@@ -162,7 +163,7 @@ public class CsrListenerTests : IDisposable
     [Fact]
     public void ValidateCsr_NotP256_Rejected()
     {
-        using var rsa = RSA.Create(2048);
+        using var rsa = RSA.Create();
         var req = new CertificateRequest(
             new X500DistinguishedName("CN=test"),
             rsa, HashAlgorithmName.SHA256);
