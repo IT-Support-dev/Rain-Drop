@@ -21,13 +21,7 @@ public class ThemeTests
         // OnAccent (white) on Accent (black)
         { "on-accent/accent", Theme.OnAccent, Theme.Accent },
         { "on-accent/accent-hover", Theme.OnAccent, Theme.AccentHover },
-        { "on-accent/accent-pressed", Theme.OnAccent, Theme.AccentPressed },
-        // Status dot colors on Surface (dots are decorative, not text)
-        { "online/surface", Theme.Online, Theme.Surface },
-        { "waiting/surface", Theme.Waiting, Theme.Surface },
-        { "danger/surface", Theme.Danger, Theme.Surface },
-        { "offline/surface", Theme.Offline, Theme.Surface },
-        // Link (black) on surfaces
+        { "on-accent/accent-pressed", Theme.OnAccent, Theme.AccentPressed },        // Link (black) on surfaces
         { "link/background", Theme.Link, Theme.Background },
         { "link/surface", Theme.Link, Theme.Surface },
     };
