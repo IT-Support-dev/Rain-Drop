@@ -72,10 +72,15 @@ public sealed class PairingCodeStore : IDisposable
         reason = null;
         lock (_gate)
         {
-            EvictExpired();
             if (!_codes.TryGetValue(code, out var entry))
             {
                 reason = "รหัสไม่ถูกต้องหรือหมดอายุแล้ว";
+                return false;
+            }
+
+            if (entry.WrongAttempts >= MaxWrongAttempts)
+            {
+                reason = "รหัสถูกยกเลิกเพราะผิดเกินกำหนด";
                 return false;
             }
 
@@ -91,12 +96,6 @@ public sealed class PairingCodeStore : IDisposable
                 return false;
             }
 
-            if (entry.WrongAttempts >= MaxWrongAttempts)
-            {
-                reason = "รหัสถูกยกเลิกเพราะผิดเกินกำหนด";
-                return false;
-            }
-
             codeBytes = entry.CodeBytes;
             return true;
         }
@@ -109,7 +108,6 @@ public sealed class PairingCodeStore : IDisposable
         reason = null;
         lock (_gate)
         {
-            EvictExpired();
             if (!_codes.TryGetValue(code, out var entry))
             {
                 reason = "รหัสไม่ถูกต้องหรือหมดอายุแล้ว";
@@ -185,8 +183,8 @@ public sealed class PairingCodeStore : IDisposable
     private void EvictExpired()
     {
         var now = _clock();
-        // ลบเฉพาะที่หมดอายุแล้วเท่านั้น ไม่ลบที่ถูก use ไปแล้ว (ต้องคงไว้ให้ตรวจสอบซ้ำได้)
-        var expired = _codes.Where(kv => kv.Value.ExpiresAt < now && !kv.Value.Consumed).Select(kv => kv.Key).ToList();
+        // ลบรายการที่หมดอายุแล้ว หรือถูกใช้ไปแล้ว (cleanup ตารางเพื่อกัน DoS)
+        var expired = _codes.Where(kv => kv.Value.ExpiresAt < now || kv.Value.Consumed).Select(kv => kv.Key).ToList();
         foreach (var key in expired) _codes.Remove(key);
     }
 
