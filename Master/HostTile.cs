@@ -17,12 +17,13 @@ internal interface ITile : IDisposable
 }
 
 /// <summary>
-/// การ์ดเครื่องลูกสไตล์ Swiss/Minimal (Phase U3)
-/// ไม่มีกรอบ ไม่มีพื้นหลังต่างจากหน้า ใช้เส้นบนบาง 1px
+/// การ์ดเครื่องลูกสไตล์ Light Swiss/Minimal (Phase U4)
+/// .card → เส้นบน 2px สีดำ ไม่มีกรอบ/พื้นหลัง/เงา ช่องว่างใต้เส้นก่อนเนื้อหา 24px
+/// Hover เปลี่ยนสีเส้นเป็น #B38B6D ภายใน 200ms (timer interpolate สี ถ้า UIEffectsEnabled == false เปลี่ยนทันที)
+/// เลือกแล้ว: เส้นหนา 4px สีดำ (ไม่ใช้สีฟ้า)
 /// แถวแรก: ชื่อเครื่อง (semibold) ชิดซ้าย + จุดสถานะและข้อความสถานะชิดขวา
 /// แถวสอง: IP สีจาง ตามด้วยภาพหน้าจอ 16:9 ไม่มีขอบ
-/// ถ้าไม่มีภาพ: พื้นผิวเรียบ #1A1A1A พร้อมข้อความ "ไม่มีภาพ" สีจางตรงกลาง ไม่มีไอคอนใหญ่
-/// เลือกแล้ว: เส้นสีเน้นด้านบนหนา 2px แทนกรอบ
+/// ถ้าไม่มีภาพ: พื้นผิวเรียบ + ข้อความ "ไม่มีภาพ" สีจางตรงกลาง ไม่มีไอคอนใหญ่
 /// ปุ่มลัด (ควบคุม/แชท/ล็อก) โผล่เป็นข้อความตอน hover ที่มุมล่างขวา
 /// </summary>
 internal sealed class HostTile : UserControl, ITile
@@ -32,14 +33,17 @@ internal sealed class HostTile : UserControl, ITile
     private readonly Label _address;
     private readonly StatusBadge _badge;
     private readonly FlowLayoutPanel _shortcuts;
-    private readonly Panel _topLine;           // เส้นบน 1px (ปกติ) / 2px สีเน้น (เลือก)
+    private readonly Panel _topLine;           // เส้นบน 2px สีดำ / 4px สีดำเมื่อเลือก
     private readonly MasterSettings _settings;
     private readonly MasterKey _key;
     private readonly MasterPki _pki;
     private readonly CancellationTokenSource _cts = new();
+    private readonly System.Windows.Forms.Timer _hoverTimer = new() { Interval = 16 };
     private AgentClient? _client;
     private bool _selected;
     private bool _hasUnread;
+    private bool _hovering;
+    private int _hoverStep; // 0..20 สำหรับ interpolate สีเส้น
 
     public HostEntry Host { get; }
     public event EventHandler? OpenRemoteRequested;
@@ -82,22 +86,22 @@ internal sealed class HostTile : UserControl, ITile
         Size = new Size(Theme.CardWidth, Theme.CardHeight);
         Margin = new Padding(Theme.Space2);
         Padding = Padding.Empty;
-        BackColor = Theme.ZoneContent;   // เดียวกับพื้นหน้า ไม่มีพื้นหลังต่างกัน
+        BackColor = Theme.ZoneContent;
         DoubleBuffered = true;
 
-        // เส้นบน: ปกติ 1px สีจาง เลือกแล้ว 2px สีเน้น
+        // เส้นบน: 2px สีดำ (เลือกแล้ว 4px สีดำ)
         _topLine = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 1,
-            BackColor = Theme.Border,
+            Height = 2,
+            BackColor = Theme.TextPrimary,
         };
 
         var surface = new Panel
         {
             Dock = DockStyle.Fill,
             BackColor = Theme.ZoneContent,
-            Padding = new Padding(Theme.Space2),
+            Padding = new Padding(Theme.Space2, Theme.Space3, Theme.Space2, Theme.Space2), // ช่องว่างใต้เส้น 24px
         };
 
         // ภาพหน้าจอ 16:9 ไม่มีขอบ (ถ้าไม่มีภาพ แสดงพื้นผิวเรียบ + ข้อความ "ไม่มีภาพ")
@@ -123,15 +127,16 @@ internal sealed class HostTile : UserControl, ITile
         _name = new Label
         {
             Dock = DockStyle.Top,
+            AutoSize = false,
             Height = Theme.Space3,
             Text = host.Name,
             Font = Theme.FontDeviceName,    // 13pt semibold
             ForeColor = Theme.TextPrimary,
             TextAlign = ContentAlignment.MiddleLeft,
-            AutoEllipsis = true,
+            UseMnemonic = false,
         };
 
-        // แถวสถานะ: จุดสี 8px + ข้อความ ชิดขวา
+        // แถวสถานะ: จุดสี 8px + ข้อความสีเข้ม ชิดขวา
         var statusRow = new Panel
         {
             Dock = DockStyle.Top,
@@ -147,15 +152,16 @@ internal sealed class HostTile : UserControl, ITile
         _address = new Label
         {
             Dock = DockStyle.Top,
+            AutoSize = false,
             Height = Theme.Space2,
             Text = host.Address,
             Font = Theme.FontCaption,
             ForeColor = Theme.TextMuted,
             TextAlign = ContentAlignment.MiddleLeft,
-            AutoEllipsis = true,
+            UseMnemonic = false,
         };
 
-        // ปุ่มลัด: ข้อความโผล่ตอน hover ที่มุมล่างขวา
+        // ปุ่มลัด: ข้อความโผล่ตอน hover มุมล่างขวา
         _shortcuts = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -186,14 +192,37 @@ internal sealed class HostTile : UserControl, ITile
         Controls.Add(_topLine);
         Controls.Add(surface);
 
+        _hoverTimer.Tick += (_, _) =>
+        {
+            if (_hovering && _hoverStep < 20) _hoverStep++;
+            else if (!_hovering && _hoverStep > 0) _hoverStep--;
+            else { _hoverTimer.Stop(); }
+            UpdateBorder();
+        };
+
         void Select(object? s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Selected = !Selected; }
         _pic.MouseClick += Select;
         _name.MouseClick += Select;
         _pic.DoubleClick += (_, _) => OpenRemoteRequested?.Invoke(this, EventArgs.Empty);
         void Hover(Control c)
         {
-            c.MouseEnter += (_, _) => _shortcuts.Visible = true;
-            c.MouseLeave += (_, _) => { if (!ClientRectangle.Contains(PointToClient(Cursor.Position))) _shortcuts.Visible = false; };
+            c.MouseEnter += (_, _) =>
+            {
+                _hovering = true;
+                _shortcuts.Visible = true;
+                if (SystemInformation.UIEffectsEnabled) _hoverTimer.Start();
+                else UpdateBorder();
+            };
+            c.MouseLeave += (_, _) =>
+            {
+                _hovering = false;
+                if (!ClientRectangle.Contains(PointToClient(Cursor.Position)))
+                {
+                    _shortcuts.Visible = false;
+                    if (SystemInformation.UIEffectsEnabled) _hoverTimer.Start();
+                    else UpdateBorder();
+                }
+            };
             foreach (Control child in c.Controls) Hover(child);
         }
         Hover(this);
@@ -202,10 +231,32 @@ internal sealed class HostTile : UserControl, ITile
 
     private void UpdateBorder()
     {
-        _topLine.Height = _selected ? 2 : 1;
-        _topLine.BackColor = _selected ? Theme.Accent : Theme.Border;
-        if (_hasUnread)
-            _topLine.BackColor = Theme.Waiting;
+        if (_selected)
+        {
+            _topLine.Height = 4;
+            _topLine.BackColor = Theme.TextPrimary;
+        }
+        else if (_hovering || _hoverStep > 0)
+        {
+            _topLine.Height = 2;
+            // interpolate สีจากดำ → #B38B6D
+            var t = _hoverStep / 20.0;
+            _topLine.BackColor = InterpolateColor(Theme.TextPrimary, Theme.AccentLine, t);
+        }
+        else
+        {
+            _topLine.Height = 2;
+            _topLine.BackColor = Theme.TextPrimary;
+        }
+    }
+
+    private static Color InterpolateColor(Color a, Color b, double t)
+    {
+        t = Math.Clamp(t, 0, 1);
+        return Color.FromArgb(
+            (int)(a.R + (b.R - a.R) * t),
+            (int)(a.G + (b.G - a.G) * t),
+            (int)(a.B + (b.B - a.B) * t));
     }
 
     public void Start() => _ = PollLoopAsync();
@@ -279,6 +330,7 @@ internal sealed class HostTile : UserControl, ITile
     {
         if (disposing)
         {
+            _hoverTimer.Dispose();
             _cts.Cancel();
             _client?.Dispose();
             _pic.Image?.Dispose();
@@ -287,7 +339,7 @@ internal sealed class HostTile : UserControl, ITile
     }
 }
 
-/// <summary>การ์ดสำหรับโหมดตัวอย่าง UI: สไตล์เดียวกับ Hosttile แต่ไม่เชื่อมต่อเครือข่าย</summary>
+/// <summary>การ์ดสำหรับโหมดตัวอย่าง UI: สไตล์เดียวกับ HostTile แต่ไม่เชื่อมต่อเครือข่าย</summary>
 internal sealed class PreviewHostTile : UserControl, ITile
 {
     private readonly PictureBox _pic;
@@ -327,15 +379,15 @@ internal sealed class PreviewHostTile : UserControl, ITile
         _topLine = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 1,
-            BackColor = Theme.Border,
+            Height = 2,
+            BackColor = Theme.TextPrimary,
         };
 
         var surface = new Panel
         {
             Dock = DockStyle.Fill,
             BackColor = Theme.ZoneContent,
-            Padding = new Padding(Theme.Space2),
+            Padding = new Padding(Theme.Space2, Theme.Space3, Theme.Space2, Theme.Space2),
         };
 
         _pic = new UiPictureBox
@@ -344,7 +396,7 @@ internal sealed class PreviewHostTile : UserControl, ITile
             SizeMode = PictureBoxSizeMode.Zoom,
             BackColor = Theme.Surface,
         };
-        _pic.Image = UiIcons.Get(UiIcon.Computer, Theme.TextDisabled, Theme.IconSize); // ไอคอนเล็กตาม spec
+        _pic.Image = UiIcons.Get(UiIcon.Computer, Theme.TextDisabled, Theme.IconSize);
         _pic.Paint += (_, e) =>
         {
             if (_pic.Image is null)
@@ -361,12 +413,13 @@ internal sealed class PreviewHostTile : UserControl, ITile
         _name = new Label
         {
             Dock = DockStyle.Top,
+            AutoSize = false,
             Height = Theme.Space3,
             Text = host.Name,
             Font = Theme.FontDeviceName,
             ForeColor = Theme.TextPrimary,
             TextAlign = ContentAlignment.MiddleLeft,
-            AutoEllipsis = true,
+            UseMnemonic = false,
         };
 
         var statusRow = new Panel
@@ -388,12 +441,13 @@ internal sealed class PreviewHostTile : UserControl, ITile
         _address = new Label
         {
             Dock = DockStyle.Top,
+            AutoSize = false,
             Height = Theme.Space2,
             Text = host.Address,
             Font = Theme.FontCaption,
             ForeColor = Theme.TextMuted,
             TextAlign = ContentAlignment.MiddleLeft,
-            AutoEllipsis = true,
+            UseMnemonic = false,
         };
 
         surface.Controls.Add(_pic);
@@ -412,10 +466,16 @@ internal sealed class PreviewHostTile : UserControl, ITile
 
     private void UpdateBorder()
     {
-        _topLine.Height = _selected ? 2 : 1;
-        _topLine.BackColor = _selected ? Theme.Accent : Theme.Border;
-        if (_hasUnread)
-            _topLine.BackColor = Theme.Waiting;
+        if (_selected)
+        {
+            _topLine.Height = 4;
+            _topLine.BackColor = Theme.TextPrimary;
+        }
+        else
+        {
+            _topLine.Height = 2;
+            _topLine.BackColor = Theme.TextPrimary;
+        }
     }
 
     public void Start() { }
@@ -423,7 +483,6 @@ internal sealed class PreviewHostTile : UserControl, ITile
 
     protected override void Dispose(bool disposing)
     {
-        // _pic.Image เป็นไอคอนจาก UiIcons cache — ไม่ต้อง Dispose
         base.Dispose(disposing);
     }
 }

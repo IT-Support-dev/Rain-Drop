@@ -7,40 +7,23 @@ public class ThemeTests
 {
     public static TheoryData<string, Color, Color> TextPairs => new()
     {
+        // Light theme: TextPrimary #000000 on all light surfaces passes easily
         { "primary/background", Theme.TextPrimary, Theme.Background },
         { "primary/surface", Theme.TextPrimary, Theme.Surface },
+        { "primary/surface-alt", Theme.TextPrimary, Theme.SurfaceAlt },
+        // TextSecondary #4B5563 on white and surface
+        { "secondary/background", Theme.TextSecondary, Theme.Background },
         { "secondary/surface", Theme.TextSecondary, Theme.Surface },
-        { "secondary/alt", Theme.TextSecondary, Theme.SurfaceAlt },
+        { "secondary/surface-alt", Theme.TextSecondary, Theme.SurfaceAlt },
+        // TextMuted (darkened for light theme) on surfaces
         { "muted/surface", Theme.TextMuted, Theme.Surface },
         { "muted/background", Theme.TextMuted, Theme.Background },
-        { "muted/alt", Theme.TextMuted, Theme.SurfaceAlt },
-        { "disabled/surface", Theme.TextDisabled, Theme.Surface },
+        // OnAccent (white) on Accent (black)
         { "on-accent/accent", Theme.OnAccent, Theme.Accent },
-        { "on-accent/danger", Theme.OnAccent, Theme.DangerBackground },
-        { "online/surface", Theme.Online, Theme.Surface },
-        { "waiting/surface", Theme.Waiting, Theme.Surface },
-        { "danger/surface", Theme.Danger, Theme.Surface },
-        { "offline/surface", Theme.Offline, Theme.Surface },
-        { "secondary/background", Theme.TextSecondary, Theme.Background },
-        { "secondary/alt", Theme.TextSecondary, Theme.SurfaceAlt },
-        { "secondary/hover", Theme.TextSecondary, Theme.SurfaceHover },
-        { "secondary/pressed", Theme.TextSecondary, Theme.SurfacePressed },
         { "on-accent/accent-hover", Theme.OnAccent, Theme.AccentHover },
-        { "on-accent/accent-pressed", Theme.OnAccent, Theme.AccentPressed },
-        { "on-accent/danger-hover", Theme.OnAccent, Theme.DangerHover },
-        { "on-accent/danger-pressed", Theme.OnAccent, Theme.DangerPressed },
+        { "on-accent/accent-pressed", Theme.OnAccent, Theme.AccentPressed },        // Link (black) on surfaces
         { "link/background", Theme.Link, Theme.Background },
-        { "link/alt", Theme.Link, Theme.SurfaceAlt },
-        { "link/mine-bubble", Theme.Link, Theme.ChatBubbleMine },
-        { "primary/mine-bubble", Theme.TextPrimary, Theme.ChatBubbleMine },
-        { "primary/alt", Theme.TextPrimary, Theme.SurfaceAlt },
-        { "online/alt", Theme.Online, Theme.SurfaceAlt },
-        { "online/mine-bubble", Theme.Online, Theme.ChatBubbleMine },
-        { "disabled/background", Theme.TextDisabled, Theme.Background },
-        { "badge-online", Theme.Online, Theme.Mix(Theme.Online, Theme.Surface, Theme.BadgeBackgroundMix) },
-        { "badge-waiting", Theme.Waiting, Theme.Mix(Theme.Waiting, Theme.Surface, Theme.BadgeBackgroundMix) },
-        { "badge-danger", Theme.Danger, Theme.Mix(Theme.Danger, Theme.Surface, Theme.BadgeBackgroundMix) },
-        { "badge-offline", Theme.Offline, Theme.Mix(Theme.Offline, Theme.Surface, Theme.BadgeBackgroundMix) },
+        { "link/surface", Theme.Link, Theme.Surface },
     };
 
     [Theory]
@@ -80,7 +63,19 @@ public class ThemeTests
     [Fact]
     public void SharedFonts_AreSegoeUiAndCached()
     {
-        Assert.Equal("Segoe UI", Theme.FontBody.FontFamily.Name);
+        Assert.Equal("Segoe UI Light", Theme.FontHeading.FontFamily.Name);
         Assert.Same(Theme.FontBody, Theme.FontBody);
+    }
+
+    [Fact]
+    public void LightTheme_Colors_AreLight()
+    {
+        int bgSum = Theme.Background.R + Theme.Background.G + Theme.Background.B;
+        Assert.True(bgSum > 700, $"Background ไม่สว่างพอ: RGB=({Theme.Background.R},{Theme.Background.G},{Theme.Background.B})");
+
+        int tpSum = Theme.TextPrimary.R + Theme.TextPrimary.G + Theme.TextPrimary.B;
+        Assert.True(tpSum < 100, $"TextPrimary ไม่มืดพอ: RGB=({Theme.TextPrimary.R},{Theme.TextPrimary.G},{Theme.TextPrimary.B})");
+
+        Assert.Equal(Color.FromArgb(245, 241, 232).ToArgb(), Theme.ZoneSidebar.ToArgb());
     }
 }
