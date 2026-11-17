@@ -55,7 +55,12 @@ internal static class EnrollmentClient
 
             // Channel binding: SHA-256 ของ public key ของ cert ที่ Master โชว์ใน TLS
             byte[] channelBinding;
-            using var cert2 = new X509Certificate2(ssl.RemoteCertificate);
+            var remoteCert = ssl.RemoteCertificate;
+            if (remoteCert is null)
+            {
+                return (false, "Master ไม่ส่งใบรับรอง");
+            }
+            using var cert2 = new X509Certificate2(remoteCert);
             using (var serverKey = (ECDsa)cert2.GetECDsaPublicKey())
                 channelBinding = SHA256.HashData(serverKey.ExportSubjectPublicKeyInfo());
 
