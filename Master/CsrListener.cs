@@ -219,7 +219,7 @@ internal sealed class CsrListener : IDisposable
             }
 
             // Create CertificateRequest from public key + subject
-            using var csrRequest = new CertificateRequest(
+            var csrRequest = new CertificateRequest(
                 new X500DistinguishedName($"CN={machineName}"),
                 agentPublicKey, HashAlgorithmName.SHA256);
 
@@ -248,7 +248,7 @@ internal sealed class CsrListener : IDisposable
         }
     }
 
-    private static bool ValidateServerCert(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
+    private static bool ValidateServerCert(object? sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors errors)
     {
         // We present our own temp cert; accept it. Agent does not pin any CA.
         return true;

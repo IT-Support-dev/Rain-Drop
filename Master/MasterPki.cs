@@ -62,12 +62,12 @@ internal sealed class MasterPki : IDisposable
                 {
                     caKey = ECDsa.Create();
                     caKey.ImportPkcs8PrivateKey(KeyVault.LoadEncrypted(CaKeyPath), out _);
+                    ca = X509Certificate2.CreateFromPem(File.ReadAllText(CaPublicPath));
                 }
                 catch (CryptographicException)
                 {
                     throw new InvalidDataException("อ่านกุญแจลับของ CA ไม่สำเร็จ: ไฟล์ .dpapi ถอดรหัสไม่ได้ (อาจเกิดจากบัญชีผู้ใช้หรือเครื่องคอมพิวเตอร์เปลี่ยนไป) ถ้ายังสร้างกุญแจใหม่ทับใบรับรองเดิมทั้งหมดจะใช้ไม่ได้ กู้คืนไฟล์สำรองหรือติดต่อทีมสนับสนุนก่อนดำเนินการต่อ");
                 }
-                ca = X509Certificate2.CreateFromPem(File.ReadAllText(CaPublicPath));
             }
             else
             {
@@ -93,12 +93,12 @@ internal sealed class MasterPki : IDisposable
                     using var pub = X509Certificate2.CreateFromPem(File.ReadAllText(ClientPublicPath));
                     var key = ECDsa.Create();
                     key.ImportPkcs8PrivateKey(KeyVault.LoadEncrypted(ClientKeyPath), out _);
+                    client = pub.CopyWithPrivateKey(key);
                 }
                 catch (CryptographicException)
                 {
                     throw new InvalidDataException("อ่านกุญแจลับของ Master client ไม่สำเร็จ: ไฟล์ .dpapi ถอดรหัสไม่ได้ (อาจเกิดจากบัญชีผู้ใช้หรือเครื่องคอมพิวเตอร์เปลี่ยนไป) ถ้ายังสร้างกุญแจใหม่ทับใบรับรองเดิมทั้งหมดจะใช้ไม่ได้ กู้คืนไฟล์สำรองหรือติดต่อทีมสนับสนุนก่อนดำเนินการต่อ");
                 }
-                client = pub.CopyWithPrivateKey(key);
             }
             else
             {
