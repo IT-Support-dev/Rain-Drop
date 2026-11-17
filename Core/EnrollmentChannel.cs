@@ -20,11 +20,35 @@ public static class EnrollmentChannel
     public const int KeySize = 32;
     public const int HmacSize = 32;
 
-    /// <summary>HKDF-SHA256 extract-then-expand ใช้ HKDF.DeriveKey ของ .NET 8 (ไม่เขียน KDF เอง)</summary>
+    /// <summary>HKDF-SHA256 extract-then-expand (สร้างจาก HMACSHA256 ของ .NET เท่านั้น ไม่คิด KDF เอง)</summary>
     public static byte[] HkdfSha256(byte[] ikm, byte[] salt, string info, int length)
     {
-        return System.Security.Cryptography.HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, salt ?? Array.Empty<byte>(),
-            Encoding.UTF8.GetBytes(info), length);
+        // Extract
+        byte[] prk;
+        using (var hmac = new HMACSHA256(salt ?? Array.Empty<byte>()))
+            prk = hmac.ComputeHash(ikm);
+
+        // Expand
+        var result = new byte[length];
+        using var hmac2 = new HMACSHA256(prk);
+        var infoBytes = Encoding.UTF8.GetBytes(info);
+        int offset = 0;
+        byte counter = 1;
+        byte[]? previous = null;
+        while (offset < length)
+        {
+            using var ms = new MemoryStream();
+            if (previous is not null) ms.Write(previous, 0, previous.Length);
+            ms.Write(infoBytes, 0, infoBytes.Length);
+            ms.WriteByte(counter);
+            previous = hmac2.ComputeHash(ms.ToArray());
+            int copy = Math.Min(length - offset, previous.Length);
+            Buffer.BlockCopy(previous, 0, result, offset, copy);
+            offset += copy;
+            counter++;
+        }
+        CryptographicOperations.ZeroMemory(prk);
+        return result;
     }
 
     /// <summary>สร้าง channel binding จาก TLS exporter keying material
