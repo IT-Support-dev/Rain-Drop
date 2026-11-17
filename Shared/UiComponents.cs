@@ -2,10 +2,12 @@ using System.Drawing.Drawing2D;
 
 namespace RainDrop.Shared;
 
-internal enum ButtonKind { Primary, Secondary, Danger, Ghost }
+internal enum ButtonKind { Primary, Secondary, Danger, Ghost, Outline }
 
-/// <summary>ปุ่มสไตล์ Swiss/Minimal: เหลี่ยม ไม่มีมุมมน ไม่มีกรอบซ้อน
-/// ปุ่มหลักเป็นสีเน้น (Accent) ปุ่มรองเป็นข้อความล้วน ไอคอน+ข้อความอยู่บรรทัดเดียวกัน</summary>
+/// <summary>ปุ่มสไตล์ Swiss/Minimal Light Theme (Phase U4).
+/// .button → พื้นดำ ตัวอักษรขาว สี่เหลี่ยมคม padding ตามกริด hover #1F2937
+/// .button--outline → ขอบ 1px ดำ พื้นโปร่ง hover พื้นดำตัวอักษรขาว
+/// ปุ่มอันตรายใช้ outline สีดำ ห้ามใช้บล็อกสีแดง/ชมพู</summary>
 internal sealed class UiButton : Button
 {
     private ButtonKind _kind;
@@ -27,7 +29,6 @@ internal sealed class UiButton : Button
         FlatAppearance.BorderSize = 0;
         ApplyColors();
 
-        // ไอคอนอยู่ข้างข้อความในบรรทัดเดียวกัน (Phase U3: ไม่มีข้อความใต้ไอคอน)
         if (icon != UiIcon.None)
         {
             Image = UiIcons.Get(icon, ForeColor, Theme.IconSize);
@@ -48,29 +49,34 @@ internal sealed class UiButton : Button
 
     private void ApplyColors()
     {
-        Color back, fore, hover;
+        Color back, fore, hover, down;
         switch (_kind)
         {
             case ButtonKind.Primary:
-                back = Theme.Accent; fore = Theme.OnAccent; hover = Theme.AccentHover;
-                FlatAppearance.MouseDownBackColor = Theme.AccentPressed;
+                back = Theme.Accent; fore = Theme.OnAccent; hover = Theme.AccentHover; down = Theme.AccentPressed;
                 break;
             case ButtonKind.Danger:
-                back = Theme.Danger; fore = Theme.OnAccent; hover = Color.FromArgb(239, 68, 68);
-                FlatAppearance.MouseDownBackColor = Color.FromArgb(192, 38, 38);
+                // อันตรายใช้ outline สีดำ ไม่ใช้บล็อกสีแดง/ชมพู ตาม spec Phase U4
+                back = Color.Transparent; fore = Theme.TextPrimary; hover = Theme.SurfaceHover; down = Theme.SurfacePressed;
+                FlatAppearance.BorderSize = 1;
+                FlatAppearance.BorderColor = Theme.Border;
                 break;
             case ButtonKind.Ghost:
-                back = Color.Transparent; fore = Theme.TextSecondary; hover = Theme.SurfaceHover;
-                FlatAppearance.MouseDownBackColor = Theme.SurfacePressed;
+                back = Color.Transparent; fore = Theme.TextSecondary; hover = Theme.SurfaceHover; down = Theme.SurfacePressed;
+                break;
+            case ButtonKind.Outline:
+                back = Color.Transparent; fore = Theme.TextPrimary; hover = Theme.SurfaceHover; down = Theme.SurfacePressed;
+                FlatAppearance.BorderSize = 1;
+                FlatAppearance.BorderColor = Theme.Border;
                 break;
             default:
-                back = Theme.SurfaceAlt; fore = Theme.TextSecondary; hover = Theme.SurfaceHover;
-                FlatAppearance.MouseDownBackColor = Theme.SurfacePressed;
+                back = Theme.SurfaceAlt; fore = Theme.TextSecondary; hover = Theme.SurfaceHover; down = Theme.SurfacePressed;
                 break;
         }
         BackColor = Enabled ? (_hover ? hover : back) : Theme.Surface;
         ForeColor = Enabled ? fore : Theme.TextDisabled;
         FlatAppearance.MouseOverBackColor = hover;
+        FlatAppearance.MouseDownBackColor = down;
         if (Image is not null) Image = UiIcons.Get(IconKind, ForeColor, Theme.IconSize);
     }
 
@@ -80,7 +86,13 @@ internal sealed class UiButton : Button
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        // Phase U3: ไม่มี focus rectangle — ขีดชัดโฟกัสทำผ่านสีพื้น hover/pressed
+        // วาด focus ring: วงกรอบ 2px ดำ ห่างขอบ 3px
+        if (Focused && Enabled)
+        {
+            using var pen = new Pen(Theme.TextPrimary, 2F);
+            var rect = new Rectangle(3, 3, Width - 7, Height - 7);
+            e.Graphics.DrawRectangle(pen, rect);
+        }
     }
     protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
     protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
@@ -91,7 +103,7 @@ internal sealed class UiButton : Button
     }
 }
 
-/// <summary>สถานะเครื่องสไตล์ Swiss: จุดสี 8px + ข้อความ เท่านั้น ไม่ใช้พื้นหลังแถบสี</summary>
+/// <summary>สถานะเครื่องสไตล์ Light Swiss: จุดสี 8px + ข้อความสีเข้ม ไม่มีพื้นหลังแถบสี</summary>
 internal sealed class StatusBadge : Control
 {
     private StatusKind _kind;
@@ -110,7 +122,7 @@ internal sealed class StatusBadge : Control
     }
     private void UpdateSize()
     {
-        Width = Theme.Space1 + Theme.Space1 + TextRenderer.MeasureText(_text, Font).Width; // จุด 8px + เว้น 8px + ข้อความ
+        Width = Theme.Space1 + Theme.Space1 + TextRenderer.MeasureText(_text, Font).Width;
         AccessibleName = _text;
     }
     protected override void OnPaint(PaintEventArgs e)
@@ -124,9 +136,9 @@ internal sealed class StatusBadge : Control
         };
         // วาดจุดสี 8px ด้านซ้าย
         e.Graphics.FillEllipse(Theme.Brush(color), 0, (Height - Theme.Space1) / 2, Theme.Space1, Theme.Space1);
-        // ข้อความสถานะถัดจากจุด
+        // ข้อความสถานะใช้สีเข้ม (dark text) ผ่าน contrast ≥ 4.5
         TextRenderer.DrawText(e.Graphics, _text, Font, new Rectangle(Theme.Space1, 0, Width - Theme.Space1, Height),
-            color, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+            Theme.TextPrimary, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
     }
 }
 
@@ -142,8 +154,8 @@ internal static class UiInput
         return box;
     }
 
-    /// <summary>ช่องค้นหาแบบขีดใต้อย่างเดียว (underline input)
-    /// placeholder "ค้นหาเครื่อง" ไอคอนแว่น 16px ซ้าย ไม่มีพื้นหลังขอบกล่อง</summary>
+    /// <summary>ช่องค้นหาแบบเส้นล่างอย่างเดียว (underline input)
+    /// placeholder "ค้นหาเครื่อง" ไอคอนแว่น 16px ซ้าย ไม่มีหัวข้อแยก ไม่มีพื้นหลังขอบกล่อง</summary>
     internal static Panel SearchBox(string placeholder, Action<string>? onTextChanged = null)
     {
         var container = new Panel
@@ -176,7 +188,6 @@ internal static class UiInput
         box.LostFocus += (_, _) => box.ForeColor = Theme.TextPrimary;
         if (onTextChanged is not null) box.TextChanged += (_, _) => onTextChanged(box.Text);
 
-        // เส้นขีดใต้ 1px สีจาง
         var underline = new Panel
         {
             Dock = DockStyle.Bottom,
@@ -244,11 +255,11 @@ internal static class UiInput
     }
 }
 
-/// <summary>ตัวกรองสถานะเป็นข้อความ tab (ไม่ใช่ chip): ทั้งหมด / ออนไลน์ / ออฟไลน์
-/// ตัวที่เลือกมีขีดเส้นใต้สีเน้น ข้อความต้องไม่ถูกตัด</summary>
+/// <summary>ตัวกรองสถานะเป็นข้อความ tab: ทั้งหมด / ออนไลน์ / ออฟไลน์
+/// ตัวที่เลือกมีขีดเส้นใต้ 2px สีดำ ข้อความต้องไม่ถูกตัด</summary>
 internal sealed class UiSegmentedFilter : FlowLayoutPanel
 {
-    private readonly List<UiButton> _buttons = new();
+    private readonly List<Label> _labels = new();
     private int _selectedIndex;
 
     public int SelectedIndex
@@ -267,28 +278,33 @@ internal sealed class UiSegmentedFilter : FlowLayoutPanel
         _selectedIndex = selectedIndex;
         foreach (var (label, i) in labels.Select((l, idx) => (l, idx)))
         {
-            var b = new UiButton(label, ButtonKind.Ghost)
+            var lbl = new Label
             {
-                Height = Theme.ButtonHeight,
+                Text = label,
+                Font = Theme.FontBody,
+                ForeColor = Theme.TextSecondary,
+                AutoSize = true,
                 Margin = new Padding(0, 0, Theme.Space2, 0),
-                TabIndex = i,
-                Padding = new Padding(Theme.Space2, 0, Theme.Space2, 0),
+                Cursor = Cursors.Hand,
+                Tag = i,
             };
-            b.Click += (_, _) => { SelectedIndex = i; SelectionChanged?.Invoke(this, i); };
-            _buttons.Add(b);
-            Controls.Add(b);
+            lbl.MouseEnter += (_, _) => { if (i != _selectedIndex) lbl.ForeColor = Theme.TextPrimary; };
+            lbl.MouseLeave += (_, _) => { if (i != _selectedIndex) lbl.ForeColor = Theme.TextSecondary; };
+            lbl.Click += (_, _) => { SelectedIndex = i; SelectionChanged?.Invoke(this, i); };
+            _labels.Add(lbl);
+            Controls.Add(lbl);
         }
         UpdateStates();
     }
 
     private void UpdateStates()
     {
-        for (int i = 0; i < _buttons.Count; i++)
+        for (int i = 0; i < _labels.Count; i++)
         {
-            var b = _buttons[i];
+            var lbl = _labels[i];
             bool sel = i == _selectedIndex;
-            b.ForeColor = sel ? Theme.Accent : Theme.TextSecondary;
-            b.Font = sel ? Theme.FontBodyStrong : Theme.FontBody;
+            lbl.ForeColor = sel ? Theme.TextPrimary : Theme.TextSecondary;
+            lbl.Font = sel ? Theme.FontBodyStrong : Theme.FontBody;
         }
     }
 }
