@@ -21,7 +21,7 @@ internal static class EnrollmentClient
         try
         {
             // --- อ่านรหัสจาก stdin (บรรทัดเดียว) ไม่รับจาก argument กันหลุดลง log ---
-            string? codeLine = await Console.In.ReadLineAsync();
+            string codeLine = await Console.In.ReadLineAsync();
             string code = codeLine?.Trim() ?? "";
             if (string.IsNullOrEmpty(code))
             {
@@ -79,7 +79,7 @@ internal static class EnrollmentClient
             await WriteLineAsync(ssl, codeLineOut);
 
             // --- รับ NONCE ---
-            string? nonceLine = await ReadLineAsync(sr);
+            string nonceLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(nonceLine) || !nonceLine.StartsWith("NONCE ", StringComparison.Ordinal))
             {
                 return (false, "Master ไม่ตอบกลับ NONCE ที่ถูกต้อง");
@@ -96,7 +96,7 @@ internal static class EnrollmentClient
             await WriteLineAsync(ssl, agentLine);
 
             // --- รับ PROOF ของ Master และตรวจ ---
-            string? masterProofLine = await ReadLineAsync(sr);
+            string masterProofLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(masterProofLine) || !masterProofLine.StartsWith("PROOF ", StringComparison.Ordinal))
             {
                 return (false, "Master ส่งพิสูจน์ตัวตนไม่ถูกต้อง");
@@ -118,14 +118,14 @@ internal static class EnrollmentClient
             await WriteLineAsync(ssl, $"PUBKEY {Convert.ToBase64String(spki)}");
 
             // --- รับ ISSUED + CA ---
-            string? issuedLine = await ReadLineAsync(sr);
+            string issuedLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(issuedLine) || !issuedLine.StartsWith("ISSUED ", StringComparison.Ordinal))
             {
                 return (false, "Master ไม่ออกใบรับรอง: " + issuedLine);
             }
             byte[] agentCertDer = Convert.FromBase64String(issuedLine[7..].Trim());
 
-            string? caLine = await ReadLineAsync(sr);
+            string caLine = await ReadLineAsync(sr);
             if (string.IsNullOrWhiteSpace(caLine) || !caLine.StartsWith("CA ", StringComparison.Ordinal))
             {
                 return (false, "Master ไม่ส่ง CA public cert");
@@ -167,7 +167,7 @@ internal static class EnrollmentClient
         return (masterAddress, Protocol.DefaultPort);
     }
 
-    private static bool ValidateServerCert(object? sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors errors)
+    private static bool ValidateServerCert(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
     {
         // Agent ยังไม่มี CA ของ Master ให้ pin — ยอมรับทุก cert แล้วพึ่ง channel binding แทน
         return true;

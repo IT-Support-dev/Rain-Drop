@@ -97,7 +97,7 @@ internal sealed class CsrListener : IDisposable
     private async Task HandleClientAsync(Socket client)
     {
         using var stream = new NetworkStream(client, ownsSocket: true);
-        string? ip = client.RemoteEndPoint is IPEndPoint ep ? ep.Address.ToString() : null;
+        string ip = client.RemoteEndPoint is IPEndPoint ep ? ep.Address.ToString() : null;
         try
         {
             // Per-IP rate limit before crypto
@@ -118,7 +118,7 @@ internal sealed class CsrListener : IDisposable
             using var sr = new StreamReader(ssl, Encoding.UTF8, leaveOpen: true);
 
             // --- Step 1: Client sends CODE ---
-            string? codeLine = await sr.ReadLineAsync();
+            string codeLine = await sr.ReadLineAsync();
             if (string.IsNullOrWhiteSpace(codeLine)) return;
             var parts = codeLine.Trim().Split(' ', 2);
             if (parts.Length < 2 || parts[0] != "CODE")
@@ -145,7 +145,7 @@ internal sealed class CsrListener : IDisposable
             await WriteLineAsync(ssl, nonceLine);
 
             // --- Step 4: Client sends PROOF ---
-            string? agentLine = await sr.ReadLineAsync();
+            string agentLine = await sr.ReadLineAsync();
             if (string.IsNullOrWhiteSpace(agentLine))
             {
                 RecordFailure(ip, code, "missing-agent-proof");
@@ -184,7 +184,7 @@ internal sealed class CsrListener : IDisposable
             await WriteLineAsync(ssl, $"PROOF {Convert.ToHexString(masterProof)}");
 
             // --- Step 6: Client sends CSR (base64 DER) ---
-            string? csrLine = await sr.ReadLineAsync();
+            string csrLine = await sr.ReadLineAsync();
             if (string.IsNullOrWhiteSpace(csrLine))
             {
                 await WriteLineAsync(ssl, "REJECT missing-csr");
@@ -192,7 +192,7 @@ internal sealed class CsrListener : IDisposable
             }
 
             // --- Step 7: Client sends machine name ---
-            string? machineLine = await sr.ReadLineAsync();
+            string machineLine = await sr.ReadLineAsync();
             if (string.IsNullOrWhiteSpace(machineLine) || !machineLine.StartsWith("MACHINE ", StringComparison.Ordinal))
             {
                 await WriteLineAsync(ssl, "REJECT missing-machine");
@@ -201,7 +201,7 @@ internal sealed class CsrListener : IDisposable
             string machineName = machineLine[8..].Trim();
 
             // --- Step 8: Client sends public key SPKI ---
-            string? pubkeyLine = await sr.ReadLineAsync();
+            string pubkeyLine = await sr.ReadLineAsync();
             if (string.IsNullOrWhiteSpace(pubkeyLine) || !pubkeyLine.StartsWith("PUBKEY ", StringComparison.Ordinal))
             {
                 await WriteLineAsync(ssl, "REJECT missing-pubkey");
@@ -250,7 +250,7 @@ internal sealed class CsrListener : IDisposable
         }
     }
 
-    private static bool ValidateServerCert(object? sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors errors)
+    private static bool ValidateServerCert(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
     {
         // We present our own temp cert; accept it. Agent does not pin any CA.
         return true;
@@ -262,7 +262,7 @@ internal sealed class CsrListener : IDisposable
         await s.WriteAsync(bytes, 0, bytes.Length);
     }
 
-    private void RecordFailure(string? ip, string? code, string reason)
+    private void RecordFailure(string ip, string code, string reason)
     {
         if (ip is not null)
         {
@@ -283,7 +283,7 @@ internal sealed class CsrListener : IDisposable
         _audit.Append(new AuditEvent("auth-fail", ip ?? "?", "fail", reason));
     }
 
-    private bool RateCheck(string? ip, out int remaining)
+    private bool RateCheck(string ip, out int remaining)
     {
         remaining = 0;
         if (ip is null) return true;
