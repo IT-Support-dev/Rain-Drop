@@ -274,106 +274,104 @@ public static class EnrollmentFile
         if (manifest.Format != CurrentFormat || !Guid.TryParseExact(manifest.MachineId, "N", out _))
             throw new InvalidDataException("Unsupported enrollment format");
         return (manifest, Convert.FromBase64String(manifest.BundleBase64));
-    }
-}
+    /// <summary>พอร์ตสำหรับ enrollment listener (แยกจาก control channel พอร์ต 11400)</summary>
+    public const int EnrollmentPort = 11401;
 
-/// <summary>พอร์ตสำหรับ enrollment listener (แยกจาก control channel พอร์ต 11400)</summary>
-public const int EnrollmentPort = 11401;
-
-/// <summary>ตรวจสอบ CSR ก่อนเซ็น: subject, ชนิด/ขนาดกุญแจ, ห้ามขอ CA:true, ห้าม EKU ผิด</summary>
-public static CsrValidationResult ValidateCsr(byte[] csrDer, string expectedMachineId, string expectedMachineName)
-{
-    try
+    /// <summary>ตรวจสอบ CSR ก่อนเซ็น: subject, ชนิด/ขนาดกุญแจ, ห้ามขอ CA:true, ห้าม EKU ผิด</summary>
+    public static CsrValidationResult ValidateCsr(byte[] csrDer, string expectedMachineId, string expectedMachineName)
     {
-        var request = new CertificateRequest(csrDer);
-        // ตรวจชื่อเรื่อง
-        if (!request.CertificateName.Name.Contains($"CN={expectedMachineName}", StringComparison.Ordinal))
-            return new CsrValidationResult(false, "subject-CN-mismatch");
-
-        // ตรวจกุญแจต้องเป็น ECDSA P-256
-        using var publicKey = request.PublicKey as ECDsa;
-        if (publicKey is null || publicKey.KeySize != 256)
-            return new CsrValidationResult(false, "invalid-key-type-or-size");
-
-        // ตรวจ EKU ต้องเป็น ServerAuth เท่านั้น ห้ามขอ CA:true
-        var basicConstraints = request.CertificateExtensions.OfType<X509BasicConstraintsExtension>().FirstOrDefault();
-        if (basicConstraints is not null && basicConstraints.CertificateAuthority)
-            return new CsrValidationResult(false, "ca-true-forbidden");
-
-        var eku = request.CertificateExtensions.OfType<X509EnhancedKeyUsageExtension>().FirstOrDefault();
-        if (eku is null || !eku.Critical)
-            return new CsrValidationResult(false, "eku-missing-or-not-critical");
-        if (!eku.EnhancedKeyUsages.Cast<Oid>().Any(o => o.Value == ServerAuthOid))
-            return new CsrValidationResult(false, "eku-wrong-role");
-
-        // ตรวจ MachineId ใน subject ถ้ามีการใส่ไว้
-        if (!string.IsNullOrEmpty(expectedMachineId))
+        try
         {
-            if (!request.CertificateName.Name.Contains(expectedMachineId, StringComparison.OrdinalIgnoreCase))
-                return new CsrValidationResult(false, "machine-id-mismatch");
+            var request = new CertificateRequest(csrDer);
+            // ตรวจชื่อเรื่อง
+            if (!request.CertificateName.Name.Contains($"CN={expectedMachineName}", StringComparison.Ordinal))
+                return new CsrValidationResult(false, "subject-CN-mismatch");
+
+            // ตรวจกุญแจต้องเป็น ECDSA P-256
+            using var publicKey = request.PublicKey as ECDsa;
+            if (publicKey is null || publicKey.KeySize != 256)
+                return new CsrValidationResult(false, "invalid-key-type-or-size");
+
+            // ตรวจ EKU ต้องเป็น ServerAuth เท่านั้น ห้ามขอ CA:true
+            var basicConstraints = request.CertificateExtensions.OfType<X509BasicConstraintsExtension>().FirstOrDefault();
+            if (basicConstraints is not null && basicConstraints.CertificateAuthority)
+                return new CsrValidationResult(false, "ca-true-forbidden");
+
+            var eku = request.CertificateExtensions.OfType<X509EnhancedKeyUsageExtension>().FirstOrDefault();
+            if (eku is null || !eku.Critical)
+                return new CsrValidationResult(false, "eku-missing-or-not-critical");
+            if (!eku.EnhancedKeyUsages.Cast<Oid>().Any(o => o.Value == ServerAuthOid))
+                return new CsrValidationResult(false, "eku-wrong-role");
+
+            // ตรวจ MachineId ใน subject ถ้ามีการใส่ไว้
+            if (!string.IsNullOrEmpty(expectedMachineId))
+            {
+                if (!request.CertificateName.Name.Contains(expectedMachineId, StringComparison.OrdinalIgnoreCase))
+                    return new CsrValidationResult(false, "machine-id-mismatch");
+            }
+
+            return new CsrValidationResult(true, null);
+        }
+        catch (Exception ex)
+        {
+            return new CsrValidationResult(false, "csr-parse-failed: " + ex.GetType().Name);
+        }
+    }
+
+    /// <summary>เซ็น CSR ด้วย CA คืนใบรับรอง Agent (พร้อม private key แยกต่างหาก)</summary>
+    public static X509Certificate2 SignCsr(
+        CertificateRequest csr,
+        X509Certificate2 ca,
+        ECDsa caKey,
+        string machineId,
+        string machineName,
+        IEnumerable<string> addresses,
+        DateTime notBefore,
+        DateTime notAfter)
+    {
+        if (!Guid.TryParseExact(machineId, "N", out _))
+            throw new ArgumentException("Machine identity must be a GUID without braces", nameof(machineId));
+        if (string.IsNullOrWhiteSpace(machineName) || machineName.Length > 128 || machineName.Any(char.IsControl))
+            throw new ArgumentException("Invalid machine name", nameof(machineName));
+
+        var san = new SubjectAlternativeNameBuilder();
+        san.AddDnsName(machineName);
+        san.AddIpAddress(IPAddress.Loopback);
+        san.AddIpAddress(IPAddress.IPv6Loopback);
+        foreach (string address in addresses)
+        {
+            if (IPAddress.TryParse(address, out var ip)) san.AddIpAddress(ip);
+            else san.AddDnsName(address);
         }
 
-        return new CsrValidationResult(true, null);
-    }
-    catch (Exception ex)
-    {
-        return new CsrValidationResult(false, "csr-parse-failed: " + ex.GetType().Name);
-    }
-}
+        // เพิ่ม SAN ลงในคำขอเดิม
+        var sanExt = san.Build();
+        csr.CertificateExtensions.Add(sanExt);
 
-/// <summary>เซ็น CSR ด้วย CA คืนใบรับรอง Agent (พร้อม private key แยกต่างหาก)</summary>
-public static X509Certificate2 SignCsr(
-    CertificateRequest csr,
-    X509Certificate2 ca,
-    ECDsa caKey,
-    string machineId,
-    string machineName,
-    IEnumerable<string> addresses,
-    DateTime notBefore,
-    DateTime notAfter)
-{
-    if (!Guid.TryParseExact(machineId, "N", out _))
-        throw new ArgumentException("Machine identity must be a GUID without braces", nameof(machineId));
-    if (string.IsNullOrWhiteSpace(machineName) || machineName.Length > 128 || machineName.Any(char.IsControl))
-        throw new ArgumentException("Invalid machine name", nameof(machineName));
+        // BasicConstraints: ไม่ใช่ CA, critical
+        csr.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        // KeyUsage: DigitalSignature เท่านั้น, critical
+        csr.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+        // EKU: ServerAuth, critical
+        csr.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new(ServerAuthOid) }, true));
+        // SKI
+        csr.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(csr.PublicKey!, false));
 
-    var san = new SubjectAlternativeNameBuilder();
-    san.AddDnsName(machineName);
-    san.AddIpAddress(IPAddress.Loopback);
-    san.AddIpAddress(IPAddress.IPv6Loopback);
-    foreach (string address in addresses)
-    {
-        if (IPAddress.TryParse(address, out var ip)) san.AddIpAddress(ip);
-        else san.AddDnsName(address);
-    }
+        var serial = RandomNumberGenerator.GetBytes(16);
+        serial[0] &= 0x7f;
+        serial[15] |= 1;
 
-    // เพิ่ม SAN ลงในคำขอเดิม
-    var sanExt = san.Build();
-    csr.CertificateExtensions.Add(sanExt);
-
-    // BasicConstraints: ไม่ใช่ CA, critical
-    csr.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
-    // KeyUsage: DigitalSignature เท่านั้น, critical
-    csr.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
-    // EKU: ServerAuth, critical
-    csr.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new(ServerAuthOid) }, true));
-    // SKI
-    csr.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(csr.PublicKey!, false));
-
-    var serial = RandomNumberGenerator.GetBytes(16);
-    serial[0] &= 0x7f;
-    serial[15] |= 1;
-
-    X509Certificate2 caForSigning = ca.HasPrivateKey ? ca : ca.CopyWithPrivateKey(caKey);
-    try
-    {
-        using var issued = csr.Create(caForSigning, notBefore, notAfter, serial);
-        var detached = ECDsa.Create();
-        detached.ImportPkcs8PrivateKey(((ECDsa)csr.PublicKey!).ExportPkcs8PrivateKey(), out _);
-        return issued.CopyWithPrivateKey(detached);
-    }
-    finally
-    {
-        if (!ca.HasPrivateKey) caForSigning?.Dispose();
+        X509Certificate2 caForSigning = ca.HasPrivateKey ? ca : ca.CopyWithPrivateKey(caKey);
+        try
+        {
+            using var issued = csr.Create(caForSigning, notBefore, notAfter, serial);
+            var detached = ECDsa.Create();
+            detached.ImportPkcs8PrivateKey(((ECDsa)csr.PublicKey!).ExportPkcs8PrivateKey(), out _);
+            return issued.CopyWithPrivateKey(detached);
+        }
+        finally
+        {
+            if (!ca.HasPrivateKey) caForSigning?.Dispose();
+        }
     }
 }
