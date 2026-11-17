@@ -203,9 +203,15 @@ public static class RepoCertificates
         try
         {
             // ตรวจกุญแจต้องเป็น ECDSA P-256
-            using var ecdsa = ECDsa.Create();
-            ecdsa.ImportSubjectPublicKeyInfo(request.PublicKey.EncodedKeyValue.RawData, out _);
-            if (ecdsa.KeySize != 256)
+            bool keyOk = false;
+            try
+            {
+                using var ecdsa = ECDsa.Create();
+                ecdsa.ImportSubjectPublicKeyInfo(request.PublicKey.EncodedKeyValue.RawData, out _);
+                keyOk = ecdsa.KeySize == 256;
+            }
+            catch { }
+            if (!keyOk)
                 return new CsrValidationResult(false, "invalid-key-type-or-size");
 
             // ตรวจ EKU ต้องเป็น ServerAuth เท่านั้น ห้ามขอ CA:true

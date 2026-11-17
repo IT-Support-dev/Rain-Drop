@@ -185,7 +185,8 @@ public sealed class PairingCodeStore : IDisposable
     private void EvictExpired()
     {
         var now = _clock();
-        var expired = _codes.Where(kv => kv.Value.ExpiresAt < now || kv.Value.Consumed).Select(kv => kv.Key).ToList();
+        // ลบเฉพาะที่หมดอายุแล้วเท่านั้น ไม่ลบที่ถูก use ไปแล้ว (ต้องคงไว้ให้ตรวจสอบซ้ำได้)
+        var expired = _codes.Where(kv => kv.Value.ExpiresAt < now && !kv.Value.Consumed).Select(kv => kv.Key).ToList();
         foreach (var key in expired) _codes.Remove(key);
     }
 
