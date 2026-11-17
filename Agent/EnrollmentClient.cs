@@ -1,3 +1,4 @@
+#nullable disable
 using System.IO;
 using System.Net;
 using System.Net.Security;
@@ -61,8 +62,10 @@ internal static class EnrollmentClient
                 return (false, "Master ไม่ส่งใบรับรอง");
             }
             using var cert2 = new X509Certificate2(remoteCert);
-            using (var serverKey = (ECDsa)cert2.GetECDsaPublicKey())
-                channelBinding = SHA256.HashData(serverKey.ExportSubjectPublicKeyInfo());
+            var serverKey = cert2.GetECDsaPublicKey();
+            if (serverKey is null)
+                return (false, "Master public key invalid");
+            channelBinding = SHA256.HashData(serverKey.ExportSubjectPublicKeyInfo());
 
             // K = HKDF-SHA256(ikm=codeBytes, salt=channelBinding, info="RainDrop-enroll-v1")
             byte[] codeBytes = Encoding.UTF8.GetBytes(code);
