@@ -85,6 +85,7 @@ internal sealed class CsrListener : IDisposable
             try
             {
                 var client = await _listenSocket.AcceptAsync(_cts.Token);
+                if (client is null) continue;
                 _ = Task.Run(() => HandleClientAsync(client), _cts.Token);
             }
             catch (OperationCanceledException) { break; }
@@ -299,7 +300,7 @@ internal sealed class CsrListener : IDisposable
 
     private static X509Certificate2 GenerateTempCert()
     {
-        using var ecdsa = ECDsa.Create(ECCurve.CreateNamedCurve(ECCurve.NamedCurves.nistP256));
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var req = new CertificateRequest(
             new X500DistinguishedName($"CN=RainDrop-Master-Temp-{Guid.NewGuid():N},O=RainDrop"),
             ecdsa, HashAlgorithmName.SHA256);
