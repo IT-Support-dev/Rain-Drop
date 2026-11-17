@@ -58,8 +58,15 @@ internal sealed class MasterPki : IDisposable
         {
             if (File.Exists(CaKeyPath) && File.Exists(CaPublicPath))
             {
-                caKey = ECDsa.Create();
-                caKey.ImportPkcs8PrivateKey(KeyVault.LoadEncrypted(CaKeyPath), out _);
+                try
+                {
+                    caKey = ECDsa.Create();
+                    caKey.ImportPkcs8PrivateKey(KeyVault.LoadEncrypted(CaKeyPath), out _);
+                }
+                catch (CryptographicException)
+                {
+                    throw new InvalidDataException("อ่านกุญแจลับของ CA ไม่สำเร็จ: ไฟล์ .dpapi ถอดรหัสไม่ได้ (อาจเกิดจากบัญชีผู้ใช้หรือเครื่องคอมพิวเตอร์เปลี่ยนไป) ถ้ายังสร้างกุญแจใหม่ทับใบรับรองเดิมทั้งหมดจะใช้ไม่ได้ กู้คืนไฟล์สำรองหรือติดต่อทีมสนับสนุนก่อนดำเนินการต่อ");
+                }
                 ca = X509Certificate2.CreateFromPem(File.ReadAllText(CaPublicPath));
             }
             else
@@ -81,9 +88,16 @@ internal sealed class MasterPki : IDisposable
 
             if (File.Exists(ClientKeyPath) && File.Exists(ClientPublicPath))
             {
-                using var pub = X509Certificate2.CreateFromPem(File.ReadAllText(ClientPublicPath));
-                var key = ECDsa.Create();
-                key.ImportPkcs8PrivateKey(KeyVault.LoadEncrypted(ClientKeyPath), out _);
+                try
+                {
+                    using var pub = X509Certificate2.CreateFromPem(File.ReadAllText(ClientPublicPath));
+                    var key = ECDsa.Create();
+                    key.ImportPkcs8PrivateKey(KeyVault.LoadEncrypted(ClientKeyPath), out _);
+                }
+                catch (CryptographicException)
+                {
+                    throw new InvalidDataException("อ่านกุญแจลับของ Master client ไม่สำเร็จ: ไฟล์ .dpapi ถอดรหัสไม่ได้ (อาจเกิดจากบัญชีผู้ใช้หรือเครื่องคอมพิวเตอร์เปลี่ยนไป) ถ้ายังสร้างกุญแจใหม่ทับใบรับรองเดิมทั้งหมดจะใช้ไม่ได้ กู้คืนไฟล์สำรองหรือติดต่อทีมสนับสนุนก่อนดำเนินการต่อ");
+                }
                 client = pub.CopyWithPrivateKey(key);
             }
             else
@@ -181,5 +195,64 @@ internal sealed class MasterPki : IDisposable
         _client.Dispose();
         _ca.Dispose();
         _caKey.Dispose();
+    }
+}
+
+    /// <summary>เซ็น CSR ที่ Agent ส่งมา ผลัดใบรับรองใหม่ให้เครื่องลูก (ไม่มี private key ของ Agent หลุดออกจากเครื่องมัน)</summary>
+    public X509Certificate2 SignAgentCsr(CertificateRequest csr, string machineId, string machineName,
+        IEnumerable<string> addresses, out string serial, out DateTime notAfterUtc)
+    {
+        lock (_gate)
+        {
+            // NotBefore ย้อนหลัง 1 วัน กันปัญหานาฬิกาเครื่องลูกไม่ตรงกัน
+            var notBefore = DateTime.UtcNow.AddDays(-1);
+            notAfterUtc = DateTime.UtcNow.AddYears(1);
+
+            var issued = RepoCertificates.SignCsr(csr, _ca, _caKey, machineId, machineName, addresses, notBefore, notAfterUtc);
+            serial = RepoCertificates.Serial(issued);
+            _issued.Add(new IssuedAgent(machineId, machineName, serial, notAfterUtc));
+            SaveState();
+            Audit.Append(new AuditEvent("enroll-csr", machineName, "ok", serial));
+            return issued;
+        }
+    }
+
+    /// <summary>คืนข้อมูลวันหมดอายุของใบรับรองเครื่อง (สำหรับแสดงใน UI และเตือนเมื่อเหลือ < 30 วัน)</summary>
+    public (string Serial, DateTime NotAfterUtc, bool IsRevoked)? GetAgentExpiry(string machineName)
+    {
+        lock (_gate)
+        {
+            var agent = _issued.LastOrDefault(a => a.MachineName.Equals(machineName, StringComparison.OrdinalIgnoreCase));
+            if (agent is null) return null;
+            return (agent.Serial, agent.NotAfterUtc, _revoked.IsRevoked(agent.Serial));
+        }
+    }
+
+    /// <summary>ยกเลิกใบรับรองเก่าและออกให้ใหม่ (re-enroll)</summary>
+    public X509Certificate2 ReEnrollAgent(CertificateRequest csr, string machineId, string machineName,
+        IEnumerable<string> addresses, out string serial, out DateTime notAfterUtc)
+    {
+        lock (_gate)
+        {
+            var existing = _issued.LastOrDefault(a => a.MachineName.Equals(machineName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidDataException("ไม่พบใบรับรองเดิมของเครื่องนี้");
+            var snapshot = _revoked.Revoke(existing.Serial);
+            SaveState();
+            Audit.Append(new AuditEvent("revoke", machineName, "ok", existing.Serial));
+            return SignAgentCsr(csr, machineId, machineName, addresses, out serial, out notAfterUtc);
+        }
+    }
+
+    /// <summary>ตรวจว่าเครื่องใดบ้างที่ใบรับรองจะหมดอายุภายใน 30 วัน</summary>
+    public List<(string MachineName, string Serial, DateTime NotAfterUtc)> ExpiringWithin30Days()
+    {
+        lock (_gate)
+        {
+            var cutoff = DateTime.UtcNow.AddDays(30);
+            return _issued
+                .Where(a => !_revoked.IsRevoked(a.Serial) && a.NotAfterUtc <= cutoff)
+                .Select(a => (a.MachineName, a.Serial, a.NotAfterUtc))
+                .ToList();
+        }
     }
 }

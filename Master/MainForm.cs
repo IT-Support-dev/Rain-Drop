@@ -20,6 +20,8 @@ internal sealed class MainForm : Form
     private readonly MasterSettings _settings;
     private readonly MasterKey _key;
     private readonly MasterPki _pki;
+    private readonly PairingCodeStore _codeStore = new();
+    private CsrListener? _enrollmentListener;
     private readonly FlowLayoutPanel _panel;                 // ตารางการ์ดเครื่อง (เนื้อหาจริง)
     private readonly Label _status = new();
     private readonly Label _count = new() { AutoSize = true, Font = Theme.FontCaption, ForeColor = Theme.TextSecondary };
@@ -162,6 +164,16 @@ internal sealed class MainForm : Form
         _count.Dock = DockStyle.Top;
         _count.Padding = new Padding(0, Theme.Space2, 0, Theme.Space2);
         _count.ForeColor = Theme.TextSecondary;
+
+        // ปุ่มเพิ่มเครื่องลูกใหม่ (C2b pairing code)
+        var btnAddDevice = new UiButton("เพิ่มเครื่องลูกใหม่", ButtonKind.Primary, UiIcon.Plus)
+        {
+            Dock = DockStyle.Bottom,
+            Height = Theme.ButtonHeightLarge,
+            Margin = new Padding(0, Theme.Space2, 0, Theme.Space2),
+        };
+        btnAddDevice.Click += async (_, _) => await AddDeviceClicked();
+        sidebar.Controls.Add(btnAddDevice);
 
         // ปุ่มท้ายแถบ: ตั้งค่า / ชุมชน เป็นข้อความธรรมดา ชิดซ้ายแนวเดียวกับทุกอย่าง
         var settings = new UiButton("ตั้งค่า", ButtonKind.Ghost, UiIcon.Settings)
@@ -759,6 +771,72 @@ internal sealed class MainForm : Form
             Process.Start("explorer.exe", $"/select,\"{MasterPki.CaPublicPath}\"");
     }
 
+    // ---------- C2b: เพิ่มเครื่องลูกใหม่ด้วย pairing code ----------
+
+    private async System.Threading.Tasks.Task AddDeviceClicked()
+    {
+        if (_uiPreview)
+        {
+            UiDialog.Show(this, "โหมดตัวอย่าง", "ไม่สามารถสร้าง pairing code ในโหมดตัวอย่างได้");
+            return;
+        }
+
+        // สร้างรหัสใหม่
+        string code;
+        try { code = _codeStore.CreateCode(); }
+        catch (InvalidOperationException ex)
+        {
+            UiDialog.Show(this, "ไม่สามารถสร้างรหัส", ex.Message, DialogKind.Warning);
+            return;
+        }
+        _pki.Audit.Append(new AuditEvent("enroll", "-", "create-code", code.Length.ToString()));
+
+        // เริ่ม enrollment listener ถ้ายังไม่รัน
+        EnsureEnrollmentListener();
+
+        // แสดงรหัสให้ผู้ดูแล (ไม่ log รหัสไว้ในที่ใด)
+        UiDialog.Show(this, "รหัสจับคู่ (pairing code)",
+            $"รหัส: {code}
+" +
+            "รหัสใช้ได้ครั้งเดียว หมดอายุใน 10 นาที
+" +
+            "นำรหัสนี้ไปใส่ในตัวติดตั้ง Agent ของเครื่องลูก
+
+" +
+            "ห้ามบอกรหัสแก่บุคคลอื่น และห้ามบันทึกรหัสไว้ในเอกสารใดๆ");
+
+
+        // นับถอยหลังหมดอายุ เตือนเมื่อเหลือ 1 นาที
+        _ = System.Threading.Tasks.Task.Delay(9 * 60 * 1000).ContinueWith(_ =>
+        {
+            if (_codeStore.ActiveCount > 0)
+                BeginInvoke(new Action(() => ShowToast("หมดอายุเร็วๆ นี้", "pairing code จะหมดอายุภายใน 1 นาที", "warning")));
+        });
+
+        // ตรวจว่าหมดรหัสทั้งหมดเมื่อใด จะปิด listener
+        _ = System.Threading.Tasks.Task.Delay(10 * 60 * 1000).ContinueWith(_ =>
+        {
+            if (_codeStore.ActiveCount == 0 && _enrollmentListener is not null)
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    _enrollmentListener.Stop();
+                    _enrollmentListener = null;
+                }));
+            }
+        });
+    }
+
+    private void EnsureEnrollmentListener()
+    {
+        if (_enrollmentListener is null)
+        {
+            _enrollmentListener = new CsrListener(_codeStore, _pki, _pki.Audit,
+                System.Net.IPAddress.Any, RepoCertificates.EnrollmentPort);
+            _enrollmentListener.Start();
+        }
+    }
+
     // ---------- การแจ้งเตือนจากเครื่องลูก ----------
 
     private void OnAlertReceived(ITile tile, AlertMsg msg)
@@ -977,6 +1055,8 @@ internal sealed class MainForm : Form
             _pki.Dispose();
             _key.Dispose();
         }
+        _enrollmentListener?.Stop();
+        _codeStore.Dispose();
         base.OnFormClosed(e);
     }
 }

@@ -14,6 +14,15 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // C2b enrollment: pairing code อ่านจาก stdin (ไม่ส่งผ่าน command line กันหลุดลง log)
+        //   RainDrop.Agent.exe --enroll-pairing <folder> <master-host:port>
+        if (args.Length >= 3 && args[0] == "--enroll-pairing")
+        {
+            if (EnrollmentClient.Run(args[1], args[2], out string enrollError)) return 0;
+            Console.Error.WriteLine("enroll-pairing ไม่สำเร็จ: " + enrollError);
+            return 1;
+        }
+
         // โหมดใช้ตอนติดตั้ง (สิทธิ์ผู้ดูแล): เขียน agent.json (ไม่มีรหัส) + private\credentials.json (PBKDF2 hash)
         //   RainDrop.Agent.exe --init-config "<โฟลเดอร์>" "<รหัสผ่าน>" <พอร์ต> [<Hub>]
         if (args.Length >= 3 && args[0] == "--init-config")
@@ -222,7 +231,7 @@ internal sealed class AgentConfig
     /// ตัด inheritance ออกเพื่อไม่ให้สิทธิ์กว้างจากโฟลเดอร์แม่ (ProgramData) ติดลงมา
     /// ใช้ SID มาตรฐานเพื่อไม่ขึ้นกับภาษาของ Windows
     /// </summary>
-    private static void HardenFolder(string path, bool usersRead)
+    internal static void HardenFolder(string path, bool usersRead)
     {
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);

@@ -2,15 +2,18 @@
 ;  Rain Drop Agent - ตัวติดตั้งสำหรับเครื่องลูก
 ;  สร้างด้วย build-installer.bat
 ;
-;  เฟส C2a: ตัวติดตั้งไม่ฝังกุญแจใด ๆ และไม่มีรหัสผ่านเริ่มต้น
-;  ผู้ติดตั้งต้องเตรียม 3 อย่าง:
+;  เฟส C2b: ตัวติดตั้งไม่ฝังกุญแจใด ๆ และไม่มีรหัสผ่านเริ่มต้น
+;  ผู้ติดตั้งต้องเตรียม:
 ;    1) รหัสผ่านผู้ดูแล ยาวอย่างน้อย 8 ตัวอักษร (ห้ามว่าง)
-;    2) ไฟล์ enrollment bundle (.rdrop) ที่ส่งออกเฉพาะเครื่องนี้จาก Master
-;    3) รหัสของ bundle นั้น (อย่างน้อย 12 ตัวอักษร ใช้ถอด PKCS#12 ตอนติดตั้งเท่านั้น)
+;    2) ที่อยู่ Master เช่น 192.168.1.10:11400
+;    3) Pairing code 16 ตัวอักษร (สร้างจากหน้าจอ เพิ่มเครื่องลูกใหม่ บน Master)
 ;
 ;  ติดตั้งแบบเงียบ (ต้องส่งครบ ไม่งั้นล้มเหลวทันที):
 ;    RainDrop-Agent-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
-;        /PASSWORD=YourStrongPass /BUNDLE=C:\deploy\PC-01.rdrop /BUNDLEPASSWORD=YourBundlePass12
+;        /PASSWORD=YourStrongPass /MASTER=192.168.1.10:11400 /CODE=ABCD1234EFGH5678
+;
+;  รหัสจับคู่ส่งผ่าน stdin ของโปรเซสลูกเท่านั้น ไม่ขึ้นบรรท่งคำสั่ง ไม่ถูก log โดย Inno Setup
+;  หลังติดตั้งไม่เหลือรหัสไว้บนเครื่อง
 ; ============================================================
 
 #define AppName    "Rain Drop Agent"
@@ -20,6 +23,7 @@
 #define SvcName    "RainDropAgentSvc"
 #define Port       "11400"
 #define MinPasswordLen 8
+#define EnrollmentPort 11401
 
 [Setup]
 AppId={{7E3F2A41-5C1B-4D8E-9F20-RAINDROPAGENT}
@@ -61,39 +65,27 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\CapabilityAccessM
 
 [Run]
 
-; 1) ถอด enrollment bundle ด้วยรหัส แล้วเขียน identity ลง private ที่ Users เข้าไม่ได้
-Filename: "{app}\{#AppExe}"; Parameters: "--enroll ""{commonappdata}\RainDrop"" ""{code:GetBundlePath}"" ""{code:GetBundlePassword}"" ""{code:GetPassword}"" {#Port} ""{code:GetHub}"""; \
-    Flags: runhidden waituntilterminated; StatusMsg: "กำลังลงทะเบียนเครื่อง..."
-; 2) ปิดสิทธิ์เขียนของ Users บนโฟลเดอร์ค่าตั้ง (ใช้ SID เพื่อไม่ขึ้นกับภาษาของ Windows)
+; 1) เขียน pairing code ลงไฟล์ชั่วคราวใน %%TEMP%% ของผู้ติดตั้ง (จะถูกลบทันทีหลังใช้)
+Filename: "{sys}\cmd.exe"; Parameters: "/c echo {code:GetCode} > ""%%TEMP%%\raindrop_code.tmp""";     Flags: runhidden waituntilterminated
+; 2) C2b: enroll-pairing อ่านรหัสจาก stdin (pipe) — รหัสไม่ขึ้นบรรทัดคำสั่ง ไม่ถูกลง log
+;    ใช้ & del เพื่อให้ไฟล์รหัสถูกลบไม่ว่าจะสำเร็จหรือล้มเหลว
+Filename: "{sys}\cmd.exe"; Parameters: "/c type ""%%TEMP%%\raindrop_code.tmp"" | ""{app}\{#AppExe}"" --enroll-pairing ""{commonappdata}\RainDrop"" ""{code:GetMasterAddress}"" & del /f /q ""%%TEMP%%\raindrop_code.tmp""";     Flags: runhidden waituntilterminated; StatusMsg: "กำลังจับคู่เครื่องกับ Master..."
+; 3) ปิดสิทธิ์เขียนของ Users บนโฟลเดอร์ค่าตั้ง (ใช้ SID เพื่อไม่ขึ้นกับภาษาของ Windows)
 ;    S-1-5-18 = SYSTEM, S-1-5-32-544 = Administrators, S-1-5-32-545 = Users
-Filename: "{sys}\icacls.exe"; \
-    Parameters: """{commonappdata}\RainDrop"" /inheritance:r /grant:r ""*S-1-5-18:(OI)(CI)F"" ""*S-1-5-32-544:(OI)(CI)F"" ""*S-1-5-32-545:(OI)(CI)RX"""; \
-    Flags: runhidden waituntilterminated; StatusMsg: "ตั้งสิทธิ์โฟลเดอร์ค่าตั้ง..."
+Filename: "{sys}\icacls.exe";     Parameters: ""{commonappdata}\RainDrop"" /inheritance:r /grant:r ""*S-1-5-18:(OI)(CI)F"" ""*S-1-5-32-544:(OI)(CI)F"" ""*S-1-5-32-545:(OI)(CI)RX""";     Flags: runhidden waituntilterminated; StatusMsg: "ตั้งสิทธิ์โฟลเดอร์ค่าตั้ง..."
 ;    โฟลเดอร์ private เก็บ hash รหัสผ่าน ผู้ใช้ทั่วไปไม่มีสิทธิ์แม้แต่อ่าน
-Filename: "{sys}\icacls.exe"; \
-    Parameters: """{commonappdata}\RainDrop\private"" /inheritance:r /grant:r ""*S-1-5-18:(OI)(CI)F"" ""*S-1-5-32-544:(OI)(CI)F"""; \
-    Flags: runhidden waituntilterminated
-; 3) เปิดไฟร์วอลล์ทุกโปรไฟล์ (เครือข่ายใหม่ใน Windows มักถูกตั้งเป็น Public)
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Rain Drop Agent"""; \
-    Flags: runhidden waituntilterminated
-Filename: "{sys}\netsh.exe"; \
-    Parameters: "advfirewall firewall add rule name=""Rain Drop Agent"" dir=in action=allow protocol=TCP localport={#Port} profile=any"; \
-    Flags: runhidden waituntilterminated; StatusMsg: "กำลังตั้งค่าไฟร์วอลล์..."
-Filename: "{sys}\netsh.exe"; \
-    Parameters: "advfirewall firewall add rule name=""Rain Drop Agent"" dir=in action=allow protocol=UDP localport={#Port} profile=any"; \
-    Flags: runhidden waituntilterminated
-; 4) ติดตั้งและตั้งค่า Windows Service (สิทธิ์ SYSTEM, เริ่มอัตโนมัติตอนบูต)
+Filename: "{sys}\icacls.exe";     Parameters: ""{commonappdata}\RainDrop\private"" /inheritance:r /grant:r ""*S-1-5-18:(OI)(CI)F"" ""*S-1-5-32-544:(OI)(CI)F""";     Flags: runhidden waituntilterminated
+; 4) เปิดไฟร์วอลล์ทุกโปรไฟล์ (เครือข่ายใหม่ใน Windows มักถูกตั้งเป็น Public)
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Rain Drop Agent""";     Flags: runhidden waituntilterminated
+Filename: "{sys}\netsh.exe";     Parameters: "advfirewall firewall add rule name=""Rain Drop Agent"" dir=in action=allow protocol=TCP localport={#Port} profile=any";     Flags: runhidden waituntilterminated; StatusMsg: "กำลังตั้งค่าไฟร์วอลล์..."
+Filename: "{sys}\netsh.exe";     Parameters: "advfirewall firewall add rule name=""Rain Drop Agent"" dir=in action=allow protocol=UDP localport={#Port} profile=any";     Flags: runhidden waituntilterminated
+; 5) ติดตั้งและตั้งค่า Windows Service (สิทธิ์ SYSTEM, เริ่มอัตโนมัติตอนบูต)
 Filename: "{sys}\sc.exe"; Parameters: "stop {#SvcName}"; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "delete {#SvcName}"; Flags: runhidden waituntilterminated
-Filename: "{sys}\sc.exe"; \
-    Parameters: "create {#SvcName} binPath= ""{app}\{#SvcExe}"" start= auto obj= LocalSystem DisplayName= ""Rain Drop Agent Service"""; \
-    Flags: runhidden waituntilterminated; StatusMsg: "กำลังติดตั้งบริการ..."
-Filename: "{sys}\sc.exe"; Parameters: "description {#SvcName} ""ดูแลให้ Rain Drop Agent ทำงานอยู่เสมอ"""; \
-    Flags: runhidden waituntilterminated
-Filename: "{sys}\sc.exe"; Parameters: "failure {#SvcName} reset= 0 actions= restart/5000/restart/5000/restart/5000"; \
-    Flags: runhidden waituntilterminated
-Filename: "{sys}\sc.exe"; Parameters: "start {#SvcName}"; Flags: runhidden waituntilterminated; \
-    StatusMsg: "กำลังเริ่มบริการ..."
+Filename: "{sys}\sc.exe";     Parameters: "create {#SvcName} binPath= ""{app}\{#SvcExe}"" start= auto obj= LocalSystem DisplayName= ""Rain Drop Agent Service""";     Flags: runhidden waituntilterminated; StatusMsg: "กำลังติดตั้งบริการ..."
+Filename: "{sys}\sc.exe"; Parameters: "description {#SvcName} ""ดูแลให้ Rain Drop Agent ทำงานอยู่เสมอ""";     Flags: runhidden waituntilterminated
+Filename: "{sys}\sc.exe"; Parameters: "failure {#SvcName} reset= 0 actions= restart/5000/restart/5000/restart/5000";     Flags: runhidden waituntilterminated
+Filename: "{sys}\sc.exe"; Parameters: "start {#SvcName}"; Flags: runhidden waituntilterminated;     StatusMsg: "กำลังเริ่มบริการ..."
 
 [UninstallRun]
 Filename: "{sys}\sc.exe"; Parameters: "stop {#SvcName}"; Flags: runhidden; RunOnceId: "StopSvc"
@@ -105,8 +97,8 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 [Code]
 var
   PasswordPage: TInputQueryWizardPage;
-  BundlePage: TInputFileWizardPage;
-  BundlePasswordPage: TInputQueryWizardPage;
+  MasterAddressPage: TInputQueryWizardPage;
+  CodePage: TInputQueryWizardPage;
 
 // อ่านค่าจากบรรทัดคำสั่ง เช่น /PASSWORD=xxx หรือ /BUNDLE=C:\path\PC-01.rdrop
 function CmdlineParam(const Name: String): String;
@@ -137,18 +129,18 @@ begin
     Result := PasswordPage.Values[0];
 end;
 
-function GetBundlePath(Param: String): String;
+function GetMasterAddress(Param: String): String;
 begin
-  Result := CmdlineParam('/BUNDLE');
-  if (Result = '') and Assigned(BundlePage) then
-    Result := BundlePage.Values[0];
+  Result := CmdlineParam('/MASTER');
+  if (Result = '') and Assigned(MasterAddressPage) then
+    Result := MasterAddressPage.Values[0];
 end;
 
-function GetBundlePassword(Param: String): String;
+function GetCode(Param: String): String;
 begin
-  Result := CmdlineParam('/BUNDLEPASSWORD');
-  if (Result = '') and Assigned(BundlePasswordPage) then
-    Result := BundlePasswordPage.Values[0];
+  Result := CmdlineParam('/CODE');
+  if (Result = '') and Assigned(CodePage) then
+    Result := CodePage.Values[0];
 end;
 
 function GetHub(Param: String): String;
@@ -162,6 +154,8 @@ end;
 function InitializeSetup(): Boolean;
 var
   p, k: String;
+var
+  m, c: String;
 begin
   Result := True;
   if not WizardSilent then Exit;
@@ -171,23 +165,28 @@ begin
   begin
     Log('Rain Drop: ติดตั้งแบบเงียบล้มเหลว - ต้องระบุ /PASSWORD= ที่ยาวอย่างน้อย {#MinPasswordLen} ตัวอักษร (ไม่มีรหัสผ่านเริ่มต้นแล้ว)');
     SuppressibleMsgBox('ติดตั้งแบบเงียบต้องระบุ /PASSWORD= ที่ยาวอย่างน้อย {#MinPasswordLen} ตัวอักษร' + #13#10 +
-      'ตัวอย่าง: RainDrop-Agent-Setup.exe /VERYSILENT /PASSWORD=YourStrongPass /PUBLICKEY=C:\deploy\master-public.pem',
+      'ตัวอย่าง: RainDrop-Agent-Setup.exe /VERYSILENT /PASSWORD=YourStrongPass /MASTER=192.168.1.10:11400 /CODE=ABCD1234EFGH5678',
       mbCriticalError, MB_OK, MB_OK);
     Result := False;
     Exit;
   end;
 
-  k := CmdlineParam('/BUNDLE');
-  if (k = '') or (not FileExists(k)) then
+  m := CmdlineParam('/MASTER');
+  if (m = '') then
   begin
-    Log('Rain Drop: ติดตั้งแบบเงียบล้มเหลว - ต้องระบุ /BUNDLE= ไปยังไฟล์ .rdrop ที่มีอยู่จริง');
-    SuppressibleMsgBox('ติดตั้งแบบเงียบต้องระบุ /BUNDLE= ไปยังไฟล์ enrollment ของเครื่องนี้', mbCriticalError, MB_OK, MB_OK);
+    Log('Rain Drop: ติดตั้งแบบเงียบล้มเหลว - ต้องระบุ /MASTER= เช่น 192.168.1.10:11400');
+    SuppressibleMsgBox('ติดตั้งแบบเงียบต้องระบุ /MASTER= เช่น 192.168.1.10:11400', mbCriticalError, MB_OK, MB_OK);
     Result := False;
     Exit;
   end;
-  if Length(CmdlineParam('/BUNDLEPASSWORD')) < 12 then
+
+  c := CmdlineParam('/CODE');
+  if Length(c) = 0 then
   begin
-    SuppressibleMsgBox('ติดตั้งแบบเงียบต้องระบุ /BUNDLEPASSWORD= อย่างน้อย 12 ตัวอักษร', mbCriticalError, MB_OK, MB_OK);
+    Log('Rain Drop: ติดตั้งแบบเงียบล้มเหลว - ต้องระบุ /CODE= (pairing code 16 ตัวอักษร)');
+    SuppressibleMsgBox('ติดตั้งแบบเงียบต้องระบุ /CODE= (pairing code 16 ตัวอักษร)' + #13#10 +
+      'ตัวอย่าง: RainDrop-Agent-Setup.exe /VERYSILENT /PASSWORD=YourStrongPass /MASTER=192.168.1.10:11400 /CODE=ABCD1234EFGH5678',
+      mbCriticalError, MB_OK, MB_OK);
     Result := False;
     Exit;
   end;
@@ -197,23 +196,24 @@ procedure InitializeWizard();
 begin
   PasswordPage := CreateInputQueryPage(wpSelectDir,
     'ตั้งค่า Rain Drop Agent',
-    'รหัสผ่านผู้ดูแล และเซิร์ฟเวอร์ชุมชน',
-    'รหัสผ่าน: ผู้ใช้ทั่วไปจะปิดโปรแกรมได้ก็ต่อเมื่อใส่รหัสนี้ (บังคับอย่างน้อย {#MinPasswordLen} ตัวอักษร ไม่มีค่าเริ่มต้น)' + #13#10 +
-    'เซิร์ฟเวอร์ชุมชน: IP ของเครื่องที่รัน Rain Drop Hub (เว้นว่างได้ ตั้งทีหลังก็ได้)');
+    'รหัสผ่านผู้ดูแล',
+    'รหัสผ่าน: ผู้ใช้ทั่วไปจะปิดโปรแกรมได้ก็ต่อเมื่อใส่รหัสนี้ (บังคับอย่างน้อย {#MinPasswordLen} ตัวอักษร ไม่มีค่าเริ่มต้น)');
   PasswordPage.Add('รหัสผ่านผู้ดูแล (อย่างน้อย {#MinPasswordLen} ตัวอักษร):', True);
-  PasswordPage.Add('เซิร์ฟเวอร์ชุมชน (เช่น 192.168.1.10):', False);
 
-  BundlePage := CreateInputFilePage(PasswordPage.ID,
-    'Enrollment bundle ของเครื่องนี้',
-    'เลือกไฟล์ .rdrop ที่ส่งออกเฉพาะเครื่องนี้จาก Master',
-    'Master: เพิ่มเติม → ส่งออก enrollment bundle' + #13#10 +
-    'ไฟล์นี้มีใบรับรองและกุญแจลับของ Agent เข้ารหัสด้วยรหัสผ่าน ห้ามใช้ไฟล์เดียวกันหลายเครื่อง');
-  BundlePage.Add('ไฟล์ enrollment:', 'Rain Drop enrollment (*.rdrop)|*.rdrop|All files (*.*)|*.*', '.rdrop');
-  BundlePasswordPage := CreateInputQueryPage(BundlePage.ID,
-    'รหัสของ enrollment bundle',
-    'ใส่รหัสที่ใช้ตอนส่งออกไฟล์นี้จาก Master',
-    'รหัสนี้ใช้ถอดกุญแจตอนติดตั้งเท่านั้น ไม่ถูกเก็บลงเครื่องลูก');
-  BundlePasswordPage.Add('รหัส bundle (อย่างน้อย 12 ตัวอักษร):', True);
+  // C2b: แทนที่การเลือกไฟล์ .rdrop ด้วย ที่อยู่ Master + รหัสจับคู่ (masked)
+  MasterAddressPage := CreateInputQueryPage(PasswordPage.ID,
+    'ที่อยู่ Master และรหัสจับคู่',
+    'ระบุที่อยู่เซิร์ฟเวอร์ Master และ pairing code ที่สร้างจากหน้า เพิ่มเครื่องลูกใหม่',
+    'ที่อยู่ Master: เช่น 192.168.1.10:11400 (พอร์ต enrollment คือ 11401 แยกต่างหาก)' + #13#10 +
+    'Pairing code: 16 ตัวอักษร ใช้ครั้งเดียว หมดอายุ 10 นาที ไม่ถูกบันทึกลงเครื่อง');
+  MasterAddressPage.Add('ที่อยู่ Master (host:port):', False);
+  MasterAddressPage.Values[1] := '';
+
+  CodePage := CreateInputQueryPage(MasterAddressPage.ID,
+    'รหัสจับคู่ (pairing code)',
+    'ใส่ pairing Code 16 ตัวอักษรที่ได้จาก Master',
+    'รหัสนี้ใช้ครั้งเดียว และหมดอายุใน 10 นาที รหัสจะไม่ถูกบันทึกไว้บนเครื่องหลังติดตั้งเสร็จ');
+  CodePage.Add('Pairing code (16 ตัวอักษร):', True);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -230,20 +230,20 @@ begin
     end;
   end;
 
-  if Assigned(BundlePage) and (CurPageID = BundlePage.ID) then
+  if Assigned(MasterAddressPage) and (CurPageID = MasterAddressPage.ID) then
   begin
-    if not FileExists(BundlePage.Values[0]) then
+    if Length(MasterAddressPage.Values[0]) = 0 then
     begin
-      MsgBox('ไม่พบไฟล์ enrollment ที่เลือก', mbError, MB_OK);
+      MsgBox('ต้องระบุที่อยู่ Master เช่น 192.168.1.10:11400', mbError, MB_OK);
       Result := False;
       Exit;
     end;
   end;
-  if Assigned(BundlePasswordPage) and (CurPageID = BundlePasswordPage.ID) then
+  if Assigned(CodePage) and (CurPageID = CodePage.ID) then
   begin
-    if Length(BundlePasswordPage.Values[0]) < 12 then
+    if Length(CodePage.Values[0]) = 0 then
     begin
-      MsgBox('รหัส bundle ต้องยาวอย่างน้อย 12 ตัวอักษร', mbError, MB_OK);
+      MsgBox('ต้องระบุ pairing code 16 ตัวอักษร', mbError, MB_OK);
       Result := False;
       Exit;
     end;
