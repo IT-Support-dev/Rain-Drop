@@ -17,7 +17,6 @@ internal static class EnrollmentClient
     /// <summary>รัน enrollment แบบ pairing code: อ่านรหัสจาก stdin แล้วเชื่อมต่อ Master พอร์ตแยก</summary>
     public static async Task<(bool Success, string Error)> Run(string folder, string masterAddress)
     {
-        string error = "";
         try
         {
             // --- อ่านรหัสจาก stdin (บรรทัดเดียว) ไม่รับจาก argument กันหลุดลง log ---
@@ -38,7 +37,7 @@ internal static class EnrollmentClient
             int enrollmentPort = RepoCertificates.EnrollmentPort; // 11401 แยกจาก control channel
 
             // --- สร้างคู่กุญแจ P-256 บนเครื่องก่อน (private key ไม่เคยออกจากเครื่องนี้) ---
-            using var agentKey = ECDsa.Create(ECCurve.CreateNamedCurve(ECCurve.NamedCurves.nistP256));
+            using var agentKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
             // --- เชื่อมต่อ Master พอร์ต enrollment ด้วย TLS (ไม่ pin CA, ต้องไม่ใช่ TLS เปล่าๆ) ---
             using var tcp = new TcpClient();
@@ -56,7 +55,8 @@ internal static class EnrollmentClient
 
             // Channel binding: SHA-256 ของ public key ของ cert ที่ Master โชว์ใน TLS
             byte[] channelBinding;
-            using (var serverKey = (ECDsa)ssl.RemoteCertificate.GetECDsaPublicKey())
+            using var cert2 = new X509Certificate2(ssl.RemoteCertificate);
+            using (var serverKey = (ECDsa)cert2.GetECDsaPublicKey())
                 channelBinding = SHA256.HashData(serverKey.ExportSubjectPublicKeyInfo());
 
             // K = HKDF-SHA256(ikm=codeBytes, salt=channelBinding, info="RainDrop-enroll-v1")
@@ -159,7 +159,7 @@ internal static class EnrollmentClient
         return (masterAddress, Protocol.DefaultPort);
     }
 
-    private static bool ValidateServerCert(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
+    private static bool ValidateServerCert(object? sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors errors)
     {
         // Agent ยังไม่มี CA ของ Master ให้ pin — ยอมรับทุก cert แล้วพึ่ง channel binding แทน
         return true;
