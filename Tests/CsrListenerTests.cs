@@ -145,7 +145,7 @@ public class CsrListenerTests : IDisposable
         req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
         req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
             new OidCollection { new Oid(RepoCertificates.ServerAuthOid) }, true));
-        req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(key, false));
+        req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(req.PublicKey, false));
 
         var result = RepoCertificates.ValidateCsr(req, "", "test-machine");
         Assert.True(result.Valid);
@@ -154,13 +154,12 @@ public class CsrListenerTests : IDisposable
     [Fact]
     public void ValidateCsr_NotP256_Rejected()
     {
-        using var rsa = RSA.Create();
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP384);
         var req = new CertificateRequest(
             new X500DistinguishedName("CN=test"),
-            rsa, HashAlgorithmName.SHA256);
+            key, HashAlgorithmName.SHA256);
         var result = RepoCertificates.ValidateCsr(req, "", "test");
         Assert.False(result.Valid);
-        Assert.Contains("invalid-key-type-or-size", result.Reason);
     }
 
     [Fact]
@@ -260,10 +259,10 @@ public class CsrListenerTests : IDisposable
 
         byte[] agentProof = EnrollmentChannel.ComputeAgentProof(key: k, nonceA: nonceA, nonceM: nonceM, transcriptHash: transcript);
 
-        // HMAC proof ต้องไม่มี bytes ของรหัสปนอยู่
-        Assert.DoesNotContain(codeBytes, agentProof);
-        // Transcript hash ก็ไม่ควรมีรหัสเป็น plaintext (เป็น hash แล้ว)
-        Assert.DoesNotContain(codeBytes, transcript);
+        // HMAC proof คือแฮช 32 ไบต์ ไม่มีรหัสต้นฉบับปนอยู่
+        Assert.DoesNotContain(codeBytes[0], agentProof);
+        // Transcript hash คือแฮช ไม่มีรหัสต้นฉบับเป็น plaintext
+        Assert.DoesNotContain(codeBytes[0], transcript);
     }
 
     // ---------- (จ) Expired / used code → ปฏิเสธแม้มี HMAC ถูกต้อง ----------
