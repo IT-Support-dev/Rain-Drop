@@ -23,7 +23,7 @@ public static class EnrollmentChannel
     /// <summary>HKDF-SHA256 extract-then-expand ใช้ HKDF.DeriveKey ของ .NET 8 (ไม่เขียน KDF เอง)</summary>
     public static byte[] HkdfSha256(byte[] ikm, byte[] salt, string info, int length)
     {
-        return HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, salt ?? Array.Empty<byte>(),
+        return System.Security.Cryptography.HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, salt ?? Array.Empty<byte>(),
             Encoding.UTF8.GetBytes(info), length);
     }
 

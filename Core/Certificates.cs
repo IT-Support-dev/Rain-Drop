@@ -279,19 +279,17 @@ public static class EnrollmentFile
     /// <summary>พอร์ตสำหรับ enrollment listener (แยกจาก control channel พอร์ต 11400)</summary>
     public const int EnrollmentPort = 11401;
 
-    /// <summary>ตรวจสอบ CSR ก่อนเซ็น: subject, ชนิด/ขนาดกุญแจ, ห้ามขอ CA:true, ห้าม EKU ผิด</summary>
+    /// <summary>ตรวจสอบ CSR ก่อนเซ็น: ชนิด/ขนาดกุญแจ, ห้ามขอ CA:true, ห้าม EKU ผิด</summary>
     public static CsrValidationResult ValidateCsr(byte[] csrDer, string expectedMachineId, string expectedMachineName)
     {
         try
         {
             var request = new CertificateRequest(csrDer);
-            // ตรวจชื่อเรื่อง
-            if (!request.CertificateName.Name.Contains($"CN={expectedMachineName}", StringComparison.Ordinal))
-                return new CsrValidationResult(false, "subject-CN-mismatch");
 
-            // ตรวจกุญแจต้องเป็น ECDSA P-256
-            using var publicKey = request.PublicKey as ECDsa;
-            if (publicKey is null || publicKey.KeySize != 256)
+            // ตรวจกุญแจต้องเป็น ECDSA P-256 (ดึง public key จาก CSR)
+            using var ecdsa = ECDsa.Create();
+            ecdsa.ImportSubjectPublicKeyInfo(request.PublicKey.EncodedKeyValue.RawData, out _);
+            if (ecdsa.KeySize != 256)
                 return new CsrValidationResult(false, "invalid-key-type-or-size");
 
             // ตรวจ EKU ต้องเป็น ServerAuth เท่านั้น ห้ามขอ CA:true
@@ -304,13 +302,6 @@ public static class EnrollmentFile
                 return new CsrValidationResult(false, "eku-missing-or-not-critical");
             if (!eku.EnhancedKeyUsages.Cast<Oid>().Any(o => o.Value == ServerAuthOid))
                 return new CsrValidationResult(false, "eku-wrong-role");
-
-            // ตรวจ MachineId ใน subject ถ้ามีการใส่ไว้
-            if (!string.IsNullOrEmpty(expectedMachineId))
-            {
-                if (!request.CertificateName.Name.Contains(expectedMachineId, StringComparison.OrdinalIgnoreCase))
-                    return new CsrValidationResult(false, "machine-id-mismatch");
-            }
 
             return new CsrValidationResult(true, null);
         }
@@ -357,7 +348,7 @@ public static class EnrollmentFile
         // EKU: ServerAuth, critical
         csr.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new(ServerAuthOid) }, true));
         // SKI
-        csr.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(csr.PublicKey!, false));
+        csr.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(csr.PublicKey, false));
 
         var serial = RandomNumberGenerator.GetBytes(16);
         serial[0] &= 0x7f;
@@ -367,9 +358,8 @@ public static class EnrollmentFile
         try
         {
             using var issued = csr.Create(caForSigning, notBefore, notAfter, serial);
-            var detached = ECDsa.Create();
-            detached.ImportPkcs8PrivateKey(((ECDsa)csr.PublicKey!).ExportPkcs8PrivateKey(), out _);
-            return issued.CopyWithPrivateKey(detached);
+            // ใบรับรองที่ออกไม่มี private key (private key อยู่กับ Agent เท่านั้น)
+            return issued;
         }
         finally
         {

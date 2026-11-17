@@ -17,7 +17,7 @@ public sealed class PairingCodeStore : IDisposable
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _codes = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, RateEntry> _rateByIp = new(StringComparer.OrdinalIgnoreHashCode);
+    private readonly ConcurrentDictionary<string, RateEntry> _rateByIp = new(StringComparer.OrdinalIgnoreCase);
     private readonly DateTimeProvider _clock;
 
     private sealed class Entry
