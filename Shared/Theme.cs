@@ -35,7 +35,7 @@ internal static class Theme
     // ---------- ข้อความ ----------
     internal static readonly Color TextPrimary = Color.FromArgb(0, 0, 0);        // #000000
     internal static readonly Color TextSecondary = Color.FromArgb(75, 85, 99);   // #4B5563
-    internal static readonly Color TextMuted = Color.FromArgb(107, 114, 128);    // #6B7280
+    internal static readonly Color TextMuted = Color.FromArgb(55, 65, 81);   // #374151 ข้อความรองอ่อนลง ผ่าน contrast 4.5 บนพื้นสว่าง
     internal static readonly Color TextDisabled = Color.FromArgb(128, 128, 128); // #808080 — เส้นและ disabled เท่านั้น
     internal static readonly Color OnAccent = Color.FromArgb(255, 255, 255);     // ข้อความบนพื้นดำ
 
