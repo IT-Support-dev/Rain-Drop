@@ -134,24 +134,10 @@ public class CsrListenerTests : IDisposable
         var req = new CertificateRequest(
             new X500DistinguishedName("CN=test"),
             key, HashAlgorithmName.SHA256);
-        // EKU ที่ผิด (เช่น ClientAuth แทนที่จะเป็น ServerAuth)
         req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
-            new OidCollection { new Oid("1.3.6.1.5.5.7.3.2") }, true)); // ServerAuth ถูกต้องจริงๆ แล้ว
+            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, true)); // ClientAuth (wrong)
 
-        // ใช้ Oid ของ ClientAuth แทน
-        var req2 = new CertificateRequest(
-            new X500DistinguishedName("CN=test"),
-            key, HashAlgorithmName.SHA256);
-        req2.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
-            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, true)); // ClientAuth
-
-        byte[] csrDer;
-        using (var ms = new System.IO.MemoryStream())
-        {
-            req2.Export(ms);
-            csrDer = ms.ToArray();
-        }
-        var result = RepoCertificates.ValidateCsr(csrDer, "", "test");
+        var result = RepoCertificates.ValidateCsr(req, "", "test");
         Assert.False(result.Valid);
         Assert.Contains("eku-wrong-role", result.Reason);
     }
@@ -169,13 +155,7 @@ public class CsrListenerTests : IDisposable
             new OidCollection { new Oid(RepoCertificates.ServerAuthOid) }, true));
         req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(key, false));
 
-        byte[] csrDer;
-        using (var ms = new System.IO.MemoryStream())
-        {
-            req.Export(ms);
-            csrDer = ms.ToArray();
-        }
-        var result = RepoCertificates.ValidateCsr(csrDer, "", "test-machine");
+        var result = RepoCertificates.ValidateCsr(req, "", "test-machine");
         Assert.True(result.Valid);
     }
 
@@ -186,13 +166,7 @@ public class CsrListenerTests : IDisposable
         var req = new CertificateRequest(
             new X500DistinguishedName("CN=test"),
             rsa, HashAlgorithmName.SHA256);
-        byte[] csrDer;
-        using (var ms = new System.IO.MemoryStream())
-        {
-            req.Export(ms);
-            csrDer = ms.ToArray();
-        }
-        var result = RepoCertificates.ValidateCsr(csrDer, "", "test");
+        var result = RepoCertificates.ValidateCsr(req, "", "test");
         Assert.False(result.Valid);
         Assert.Contains("invalid-key-type-or-size", result.Reason);
     }

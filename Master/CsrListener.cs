@@ -180,29 +180,49 @@ internal sealed class CsrListener : IDisposable
             byte[] masterProof = EnrollmentChannel.ComputeMasterProof(k, nonceM, nonceA, transcript);
             await WriteLineAsync(ssl, $"PROOF {Convert.ToHexString(masterProof)}");
 
-            // --- Step 6: Client sends CSR ---
+            // --- Step 6: Client sends CSR (base64 DER) ---
             string? csrLine = await sr.ReadLineAsync();
             if (string.IsNullOrWhiteSpace(csrLine))
             {
                 await WriteLineAsync(ssl, "REJECT missing-csr");
                 return;
             }
-            byte[] csrDer;
-            try { csrDer = Convert.FromBase64String(csrLine.Trim()); }
-            catch { csrDer = Encoding.UTF8.GetBytes(csrLine.Trim()); }
 
-            // --- Step 7: Validate CSR ---
-            var machineName = ExtractCn(csrDer) ?? "unknown";
-            var validation = RepoCertificates.ValidateCsr(csrDer, "", machineName);
-            if (!validation.Valid)
+            // --- Step 7: Client sends machine name ---
+            string? machineLine = await sr.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(machineLine) || !machineLine.StartsWith("MACHINE ", StringComparison.Ordinal))
             {
-                RecordFailure(ip, code, "csr-invalid:" + validation.Reason);
-                await WriteLineAsync(ssl, $"REJECT {validation.Reason}");
+                await WriteLineAsync(ssl, "REJECT missing-machine");
+                return;
+            }
+            string machineName = machineLine[8..].Trim();
+
+            // --- Step 8: Client sends public key SPKI ---
+            string? pubkeyLine = await sr.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(pubkeyLine) || !pubkeyLine.StartsWith("PUBKEY ", StringComparison.Ordinal))
+            {
+                await WriteLineAsync(ssl, "REJECT missing-pubkey");
+                return;
+            }
+            byte[] spki;
+            try { spki = Convert.FromBase64String(pubkeyLine[7..].Trim()); }
+            catch { await WriteLineAsync(ssl, "REJECT invalid-pubkey"); return; }
+
+            // Import public key into ECDsa
+            using var agentPublicKey = ECDsa.Create();
+            agentPublicKey.ImportSubjectPublicKeyInfo(spki, out _);
+            if (agentPublicKey.KeySize != 256)
+            {
+                await WriteLineAsync(ssl, "REJECT invalid-key-type-or-size");
                 return;
             }
 
-            // --- Step 8: Sign CSR and return cert + CA cert ---
-            using var csrRequest = new CertificateRequest(csrDer);
+            // Create CertificateRequest from public key + subject
+            using var csrRequest = new CertificateRequest(
+                new X500DistinguishedName($"CN={machineName}"),
+                agentPublicKey, HashAlgorithmName.SHA256);
+
+            // --- Step 9: Sign and return cert + CA cert ---
             string machineId = Guid.NewGuid().ToString("N");
             string serial; DateTime notAfter;
             var issued = _pki.SignAgentCsr(csrRequest, machineId, machineName,
@@ -231,23 +251,6 @@ internal sealed class CsrListener : IDisposable
     {
         // We present our own temp cert; accept it. Agent does not pin any CA.
         return true;
-    }
-
-    private static string? ExtractCn(byte[] csrDer)
-    {
-        try
-        {
-            var req = new CertificateRequest(csrDer);
-            var name = req.CertificateName.Name;
-            foreach (var part in name.Split(','))
-            {
-                var trimmed = part.Trim();
-                if (trimmed.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
-                    return trimmed.Substring(3);
-            }
-        }
-        catch { }
-        return null;
     }
 
     private static async Task WriteLineAsync(Stream s, string text)

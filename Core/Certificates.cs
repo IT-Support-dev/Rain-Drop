@@ -280,13 +280,10 @@ public static class EnrollmentFile
     public const int EnrollmentPort = 11401;
 
     /// <summary>ตรวจสอบ CSR ก่อนเซ็น: ชนิด/ขนาดกุญแจ, ห้ามขอ CA:true, ห้าม EKU ผิด</summary>
-    public static CsrValidationResult ValidateCsr(byte[] csrDer, string expectedMachineId, string expectedMachineName)
+    public static CsrValidationResult ValidateCsr(CertificateRequest request, string expectedMachineId, string expectedMachineName)
     {
-        try
-        {
-            var request = new CertificateRequest(csrDer);
-
-            // ตรวจกุญแจต้องเป็น ECDSA P-256 (ดึง public key จาก CSR)
+        try {
+            // ตรวจกุญแจต้องเป็น ECDSA P-256
             using var ecdsa = ECDsa.Create();
             ecdsa.ImportSubjectPublicKeyInfo(request.PublicKey.EncodedKeyValue.RawData, out _);
             if (ecdsa.KeySize != 256)

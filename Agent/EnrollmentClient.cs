@@ -117,6 +117,10 @@ internal static class EnrollmentClient
             }
             await WriteLineAsync(ssl, $"CSR {Convert.ToBase64String(csrDer)}");
 
+            // ส่ง machine name และ public key SPKI แยกต่างหาก (Master ต้องการสร้าง CertificateRequest โดยไม่ต้องพาร์ส CSR)
+            await WriteLineAsync(ssl, $"MACHINE {Environment.MachineName}");
+            await WriteLineAsync(ssl, $"PUBKEY {Convert.ToBase64String(agentKey.ExportSubjectPublicKeyInfo())}");
+
             // --- รับ ISSUED + CA ---
             string? issuedLine = await sr.ReadLineAsync();
             if (string.IsNullOrWhiteSpace(issuedLine) || !issuedLine.StartsWith("ISSUED ", StringComparison.Ordinal))
