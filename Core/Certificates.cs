@@ -274,6 +274,8 @@ public static class EnrollmentFile
         if (manifest.Format != CurrentFormat || !Guid.TryParseExact(manifest.MachineId, "N", out _))
             throw new InvalidDataException("Unsupported enrollment format");
         return (manifest, Convert.FromBase64String(manifest.BundleBase64));
+    }
+
     /// <summary>พอร์ตสำหรับ enrollment listener (แยกจาก control channel พอร์ต 11400)</summary>
     public const int EnrollmentPort = 11401;
 
