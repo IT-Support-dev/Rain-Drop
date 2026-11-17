@@ -203,11 +203,20 @@ public static class RepoCertificates
         try
         {
             // ตรวจกุญแจต้องเป็น ECDSA P-256
-#pragma warning disable SYSLIB0027 // PublicKey.Key obsolete แต่วิธีที่ตรงที่สุดสำหรับ CertificateRequest
-            if (request.PublicKey is null || request.PublicKey.Key is not ECDsa ecdsa)
+            if (request.PublicKey is null)
                 return new CsrValidationResult(false, "invalid-key-type-or-size");
-#pragma warning restore SYSLIB0027
-            if (ecdsa.KeySize != 256)
+
+            // EC public key OID: 1.2.840.10045.2.1
+            if (request.PublicKey.Oid.Value != "1.2.840.10045.2.1")
+                return new CsrValidationResult(false, "invalid-key-type-or-size");
+
+            // P-256 uncompressed point: 0x04 + X(32) + Y(32) = 65 bytes
+            // EncodedKeyValue.RawData = subjectPublicKey BIT STRING value (may include leading 00 byte for unused bits)
+            var keyBytes = request.PublicKey.EncodedKeyValue.RawData;
+            bool isP256 = keyBytes.Length == 65 && keyBytes[0] == 0x04;  // uncompressed point without unused-bits prefix
+            if (!isP256 && keyBytes.Length == 66 && keyBytes[0] == 0x00 && keyBytes[1] == 0x04)
+                isP256 = true; // with unused-bits prefix
+            if (!isP256)
                 return new CsrValidationResult(false, "invalid-key-type-or-size");
 
             // ตรวจ EKU ต้องเป็น ServerAuth เท่านั้น ห้ามขอ CA:true
