@@ -648,6 +648,3 @@ public class CsrListenerTests : IDisposable
     }
 }
 
-/// <summary>ปิด parallelization ทั้งแอสเซมบลีทดสอบ กันเทสต์ loopback ต่างคลาส
-/// (CsrListenerTests vs EnrollmentClientTests) แข่งพอร์ตบน localhost</summary>
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
