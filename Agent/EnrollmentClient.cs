@@ -45,7 +45,7 @@ internal static class EnrollmentClient
         {
             // แยก host:port จาก master address
             var (host, port) = ParseMasterAddress(masterAddress);
-            int enrollmentPort = RepoCertificates.EnrollmentPort; // 11401 แยกจาก control channel
+            int enrollmentPort = port; // พอร์ต enrollment จาก master-address (แยกจาก control channel)
 
             // --- สร้างคู่กุญแจ P-256 บนเครื่องก่อน (private key ไม่เคยออกจากเครื่องนี้) ---
             using var agentKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
