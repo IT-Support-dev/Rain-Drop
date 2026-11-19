@@ -12,8 +12,29 @@ namespace RainDrop.Agent;
 internal static class Program
 {
     [STAThread]
-    private static int Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
+        // C2b enrollment: pairing code อ่านจากไฟล์ชั่วคราวเท่านั้น (ห้ามส่งผ่าน command line กันหลุดลง log)
+        //   RainDrop.Agent.exe --enroll-pairing <folder> <master-host:port> --code-file <ไฟล์รหัสชั่วคราว>
+        if (args.Length >= 3 && args[0] == "--enroll-pairing")
+        {
+            string? codeFile = null;
+            for (int i = 3; i < args.Length; i++)
+            {
+                if (args[i] == "--code-file" && i + 1 < args.Length)
+                    codeFile = args[++i];
+            }
+            if (string.IsNullOrEmpty(codeFile))
+            {
+                Console.Error.WriteLine("enroll-pairing ต้องระบุ --code-file <ไฟล์รหัสจับคู่ชั่วคราว> (ห้ามส่งรหัสบน command line)");
+                return 1;
+            }
+            var (ok, enrollError) = await EnrollmentClient.Run(args[1], args[2], codeFile);
+            if (ok) return 0;
+            Console.Error.WriteLine("enroll-pairing ไม่สำเร็จ: " + enrollError);
+            return 1;
+        }
+
         // โหมดใช้ตอนติดตั้ง (สิทธิ์ผู้ดูแล): เขียน agent.json (ไม่มีรหัส) + private\credentials.json (PBKDF2 hash)
         //   RainDrop.Agent.exe --init-config "<โฟลเดอร์>" "<รหัสผ่าน>" <พอร์ต> [<Hub>]
         if (args.Length >= 3 && args[0] == "--init-config")
@@ -222,7 +243,7 @@ internal sealed class AgentConfig
     /// ตัด inheritance ออกเพื่อไม่ให้สิทธิ์กว้างจากโฟลเดอร์แม่ (ProgramData) ติดลงมา
     /// ใช้ SID มาตรฐานเพื่อไม่ขึ้นกับภาษาของ Windows
     /// </summary>
-    private static void HardenFolder(string path, bool usersRead)
+    internal static void HardenFolder(string path, bool usersRead)
     {
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);

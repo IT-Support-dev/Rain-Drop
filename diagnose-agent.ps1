@@ -6,7 +6,6 @@
 param([switch]$Fix, [int]$Port = 11400)
 
 $exe  = Join-Path $env:ProgramFiles 'RainDrop\Agent\RainDrop.Agent.exe'
-$key  = Join-Path $env:ProgramFiles 'RainDrop\Agent\agent-public.pem'
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 $problems = 0
@@ -21,8 +20,13 @@ if ($Fix -and -not $isAdmin) { Write-Host "ต้องเปิด PowerShell �
 # 1) ติดตั้งแล้วหรือยัง
 if (Test-Path $exe) { Ok "ติดตั้งโปรแกรมแล้ว: $exe" } else { Bad "ไม่พบโปรแกรม: ยังไม่ได้ติดตั้ง RainDrop-Agent-Setup.exe" }
 
-# 2) ไฟล์กุญแจ
-if (Test-Path $key) { Ok "พบไฟล์กุญแจของ Master" } else { Bad "ไม่พบไฟล์กุญแจ $key (ติดตั้งใหม่ด้วย Agent Setup)" }
+# 2) ไฟล์ใบรับรองและกุญแจของ Agent (C2b: กุญแจสร้างบนเครื่อง ไม่มีไฟล์ .rdrop ติดตัว)
+$cert = Join-Path $env:ProgramFiles 'RainDrop\Agent\private\agent-cert.der'
+$cakey = Join-Path $env:ProgramFiles 'RainDrop\Agent\private\ca-cert.der'
+$akey = Join-Path $env:ProgramFiles 'RainDrop\Agent\private\agent-key.pkcs8'
+if (Test-Path $cert) { Ok "พบใบรับรอง Agent: $cert" } else { Bad "ไม่พบใบรับรอง Agent (ยังไม่ได้ enroll กับ Master)" }
+if (Test-Path $cakey) { Ok "พบ CA public cert: $cakey" } else { Bad "ไม่พบ CA public cert" }
+if (Test-Path $akey) { Ok "พบไฟล์กุญแจลับ Agent (เก็บใน private\ แบบ C1 ACL)" } else { Bad "ไม่พบกุญแจลับ Agent" }
 
 # 3) โปรแกรมทำงานอยู่ไหม
 $proc = Get-Process RainDrop.Agent -ErrorAction SilentlyContinue
