@@ -360,6 +360,7 @@ internal sealed class CsrListener : IDisposable
     {
         var bytes = Encoding.UTF8.GetBytes(text + "\n");
         await s.WriteAsync(bytes, 0, bytes.Length);
+        await s.FlushAsync(); // กันข้อมูลค้างใน SslStream buffer แล้ว client ได้ unexpected EOF
     }
 
     private static async Task<string> ReadLineWithTimeoutAsync(StreamReader sr)
