@@ -31,13 +31,13 @@ public class EnrollmentClientTests : IDisposable
 
     public EnrollmentClientTests()
     {
-        _tempFolder = Path.Combine(Path.GetTempPath(), $\"raindrop-enrollclient-{Guid.NewGuid():N}\");
+        _tempFolder = Path.Combine(Path.GetTempPath(), $"raindrop-enrollclient-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempFolder);
-        Directory.CreateDirectory(Path.Combine(_tempFolder, \"private\"));
+        Directory.CreateDirectory(Path.Combine(_tempFolder, "private"));
 
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var req = new CertificateRequest(
-            new X500DistinguishedName(\"CN=Fake-Master-Enrollment-Test\"),
+            new X500DistinguishedName("CN=Fake-Master-Enrollment-Test"),
             key, HashAlgorithmName.SHA256);
         req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
         req.CertificateExtensions.Add(new X509KeyUsageExtension(
@@ -54,7 +54,7 @@ public class EnrollmentClientTests : IDisposable
     {
         var timeout = Task.Delay(TimeSpan.FromSeconds(seconds));
         if (await Task.WhenAny(task, timeout) != task)
-            throw new TimeoutException($\"ทดสอบหมดเวลา ({seconds} วินาที)\");
+            throw new TimeoutException($"ทดสอบหมดเวลา ({seconds} วินาที)");
         return await task;
     }
 
@@ -62,7 +62,7 @@ public class EnrollmentClientTests : IDisposable
     {
         var timeout = Task.Delay(TimeSpan.FromSeconds(seconds));
         if (await Task.WhenAny(task, timeout) != task)
-            throw new TimeoutException($\"ทดสอบหมดเวลา ({seconds} วินาที)\");
+            throw new TimeoutException($"ทดสอบหมดเวลา ({seconds} วินาที)");
         await task;
     }
 
@@ -95,11 +95,11 @@ public class EnrollmentClientTests : IDisposable
 
         string? codeLine = await WithTimeoutAsync(sr.ReadLineAsync());
         if (string.IsNullOrWhiteSpace(codeLine)) return;
-        string code = codeLine.Trim().StartsWith(\"CODE \", StringComparison.Ordinal)
-            ? codeLine.Trim()[5..] : \"\";
+        string code = codeLine.Trim().StartsWith("CODE ", StringComparison.Ordinal)
+            ? codeLine.Trim()[5..] : "";
 
         byte[] nonceM = EnrollmentChannel.NewNonce();
-        await WithTimeoutAsync(writer.WriteLineAsync($\"NONCE {Convert.ToHexString(nonceM)}\"));
+        await WithTimeoutAsync(writer.WriteLineAsync($"NONCE {Convert.ToHexString(nonceM)}"));
         await writer.FlushAsync();
 
         if (_closeAfterNonce)
@@ -112,7 +112,7 @@ public class EnrollmentClientTests : IDisposable
         if (string.IsNullOrWhiteSpace(agentLine)) return;
 
         var parts = agentLine.Trim().Split(' ');
-        if (parts.Length < 4 || parts[0] != \"PROOF\") return;
+        if (parts.Length < 4 || parts[0] != "PROOF") return;
 
         byte[] agentProof = Convert.FromHexString(parts[1]);
         byte[] nonceA = Convert.FromHexString(parts[2]);
@@ -128,19 +128,19 @@ public class EnrollmentClientTests : IDisposable
         // ส่ง PROOF ของ Master และ flush ให้แน่ใจว่าส่งถึง Agent ก่อนที่ Agent จะอ่าน
         if (_sendWrongProof)
         {
-            await WithTimeoutAsync(writer.WriteLineAsync($\"PROOF {Convert.ToHexString(RandomNumberGenerator.GetBytes(32))}\"));
+            await WithTimeoutAsync(writer.WriteLineAsync($"PROOF {Convert.ToHexString(RandomNumberGenerator.GetBytes(32))}"));
         }
         else
         {
             byte[] masterProof = EnrollmentChannel.ComputeMasterProof(k, nonceM, nonceA, transcript);
-            await WithTimeoutAsync(writer.WriteLineAsync($\"PROOF {Convert.ToHexString(masterProof)}\"));
+            await WithTimeoutAsync(writer.WriteLineAsync($"PROOF {Convert.ToHexString(masterProof)}"));
         }
         await writer.FlushAsync();
 
         // รออ่านจาก Agent (PUBKEY หรือการปิด connection) ก่อนจบ HandleClientAsync
         // เช่นกันทำงานตามลำดับ ไม่ใช้ Task.Delay แล้วหวัง
         string? next = await WithTimeoutAsync(sr.ReadLineAsync());
-        if (next is not null && next.StartsWith(\"PUBKEY \", StringComparison.Ordinal))
+        if (next is not null && next.StartsWith("PUBKEY ", StringComparison.Ordinal))
             _receivedPubkey = true;
     }
 
@@ -152,19 +152,19 @@ public class EnrollmentClientTests : IDisposable
         _closeAfterNonce = false;
         _receivedPubkey = false;
 
-        string code = \"ABCD1234EFGH5678\";
-        string codeFile = Path.Combine(_tempFolder, \"code.txt\");
+        string code = "ABCD1234EFGH5678";
+        string codeFile = Path.Combine(_tempFolder, "code.txt");
         File.WriteAllText(codeFile, code);
 
         var (ok, error) = await WithTimeoutAsync(EnrollmentClient.Run(
-            Path.Combine(_tempFolder, \"agent-home\"),
-            $\"127.0.0.1:{_fakeMasterPort}\",
+            Path.Combine(_tempFolder, "agent-home"),
+            $"127.0.0.1:{_fakeMasterPort}",
             codeFile));
 
-        Assert.False(ok, \"Agent ต้องล้มเหลวเมื่อ Master ส่ง PROOF ปลอม: \" + error);
-        Assert.Contains(\"ไม่ตรงกัน\", error);
-        Assert.False(_receivedPubkey, \"Agent ต้องไม่ส่ง PUBKEY ก่อนที่ proof ของ Master จะผ่านการตรวจ\");
-        Assert.False(File.Exists(codeFile), \"ไฟล์รหัสต้องถูกลบทันทีหลังอ่านแล้ว\");
+        Assert.False(ok, "Agent ต้องล้มเหลวเมื่อ Master ส่ง PROOF ปลอม: " + error);
+        Assert.Contains("ไม่ตรงกัน", error);
+        Assert.False(_receivedPubkey, "Agent ต้องไม่ส่ง PUBKEY ก่อนที่ proof ของ Master จะผ่านการตรวจ");
+        Assert.False(File.Exists(codeFile), "ไฟล์รหัสต้องถูกลบทันทีหลังอ่านแล้ว");
     }
 
     /// <summary>Master ตัดการเชื่อมต่อหลังส่ง NONCE -> Agent ต้องไม่ส่ง PUBKEY</summary>
@@ -175,18 +175,18 @@ public class EnrollmentClientTests : IDisposable
         _closeAfterNonce = true;
         _receivedPubkey = false;
 
-        string code = \"ABCD1234EFGH5678\";
-        string codeFile = Path.Combine(_tempFolder, \"code2.txt\");
+        string code = "ABCD1234EFGH5678";
+        string codeFile = Path.Combine(_tempFolder, "code2.txt");
         File.WriteAllText(codeFile, code);
 
         var (ok, error) = await WithTimeoutAsync(EnrollmentClient.Run(
-            Path.Combine(_tempFolder, \"agent-home-2\"),
-            $\"127.0.0.1:{_fakeMasterPort}\",
+            Path.Combine(_tempFolder, "agent-home-2"),
+            $"127.0.0.1:{_fakeMasterPort}",
             codeFile));
 
-        Assert.False(ok, \"Agent ต้องล้มเหลวเมื่อการเชื่อมต่อขาดหลัง NONCE: \" + error);
-        Assert.False(_receivedPubkey, \"Agent ต้องไม่ส่ง PUBKEY เมื่อการเชื่อมต่อขาด\");
-        Assert.False(File.Exists(codeFile), \"ไฟล์รหัสต้องถูกลบทันทีหลังอ่านแล้ว\");
+        Assert.False(ok, "Agent ต้องล้มเหลวเมื่อการเชื่อมต่อขาดหลัง NONCE: " + error);
+        Assert.False(_receivedPubkey, "Agent ต้องไม่ส่ง PUBKEY เมื่อการเชื่อมต่อขาด");
+        Assert.False(File.Exists(codeFile), "ไฟล์รหัสต้องถูกลบทันทีหลังอ่านแล้ว");
     }
 
     public void Dispose()
