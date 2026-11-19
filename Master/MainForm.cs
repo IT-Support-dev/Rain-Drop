@@ -21,6 +21,7 @@ internal sealed class MainForm : Form
     private readonly MasterKey _key;
     private readonly MasterPki _pki;
     private readonly FlowLayoutPanel _panel;                 // ตารางการ์ดเครื่อง (เนื้อหาจริง)
+    private readonly Panel _scrollHost;                      // แผงครอบที่ทำหน้าที่ scroll ให้ _panel
     private readonly Label _status = new();
     private readonly Label _count = new() { AutoSize = true, Font = Theme.FontCaption, ForeColor = Theme.TextSecondary };
     private readonly System.Windows.Forms.Timer _sidebarTimer = new() { Interval = 1500 };
@@ -46,8 +47,13 @@ internal sealed class MainForm : Form
         Theme.ConfigureForm(this, new Size(900, 600));
         UiWindowPlacement.Attach(this, "master", new Size(1400, 860), new Size(900, 600));
 
-        _panel = new UiFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.ZoneContent };
-        ApplyDarkScrollbars(_panel);
+        // แผงครอบ scroll: FlowLayoutPanel+AutoScroll มีบั๊กคำนวณ extent แนวนอนจากการเรียงแถวเดียว
+        // (คิดว่าเนื้อหากว้าง ~2,300px ทั้งที่ wrap แล้วกว้าง ~760px) จึงโชว์ scrollbar แนวนอนค้างใต้การ์ด
+        // แก้โดยให้ Panel ธรรมดาเป็นผู้เลื่อน แล้วให้ UiFlowPanel AutoSize ตามเนื้อหาจริง (Dock=Top)
+        _scrollHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.ZoneContent };
+        ApplyDarkScrollbars(_scrollHost);
+        _panel = new UiFlowPanel { Dock = DockStyle.Top, AutoSize = true, AutoScroll = false, BackColor = Theme.ZoneContent };
+        _scrollHost.Controls.Add(_panel);
         _panel.Padding = new Padding(Theme.Space3);
 
         if (_uiPreview)
@@ -373,7 +379,7 @@ internal sealed class MainForm : Form
         _status.UseMnemonic = false;
 
         center.Controls.Add(statusDivider);
-        center.Controls.Add(_panel);
+        center.Controls.Add(_scrollHost);
         center.Controls.Add(_empty);
         center.Controls.Add(_status);
         center.Controls.Add(toolbar);

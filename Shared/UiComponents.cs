@@ -390,6 +390,16 @@ internal sealed class UiSidebarItem : Panel
 internal sealed class UiFlowPanel : FlowLayoutPanel
 {
     internal UiFlowPanel() { DoubleBuffered = true; }
+
+    // FlowLayoutPanel วัดขนาดที่ต้องการแบบเรียงลูกทุกตัวในแถวเดียวเมื่อไม่ได้ระบุความกว้าง
+    // ScrollableControl เอาค่านี้ไปคำนวณ AutoScroll extent ทำให้โชว์ scrollbar แนวนอนค้าง
+    // แม้เนื้อหาจริง (wrap แล้ว) จะกว้างไม่ถึงขอบ — จำกัดความกว้างตอนวัดให้เท่าที่มีจริงจึงคำนวณถูก
+    public override Size GetPreferredSize(Size proposedSize)
+    {
+        if (ClientSize.Width > 0 && (proposedSize.Width == 0 || proposedSize.Width > ClientSize.Width))
+            proposedSize.Width = ClientSize.Width;
+        return base.GetPreferredSize(proposedSize);
+    }
 }
 
 internal sealed class UiPictureBox : PictureBox
