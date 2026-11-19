@@ -372,7 +372,7 @@ internal sealed class CsrListener : IDisposable
         var line = await readTask;
         if (line is not null && line.Length > MaxLineLength)
             throw new InvalidDataException($"บรรท่วยาวเกินกำหนด ({MaxLineLength} bytes) ถูกตัดการเชื่อมต่อ");
-        return line;
+        return line ?? "";
     }
 
     private void RecordFailure(string? ip, string? code, string reason)
