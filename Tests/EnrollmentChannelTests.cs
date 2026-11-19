@@ -114,8 +114,6 @@ public class EnrollmentChannelTests
         byte[] info = { 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9 };
         int length = 42;
 
-        // RFC 5869 กำหนด info เป็นไบต์ดิบ f0 f1 ... f9 (ไม่ใช่สตริง UTF-8)
-        byte[] info = { 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9 };
         byte[] okm = EnrollmentChannel.HkdfSha256(ikm, salt, info, length);
 
         // Expected from RFC 5869 Test Case 1

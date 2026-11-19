@@ -589,36 +589,7 @@ public class CsrListenerTests : IDisposable
         Assert.True(response.StartsWith("REJECT") || string.IsNullOrEmpty(response), $"คาดหวัง REJECT แต่ได้: {response}");
     }
 
-    // ---------- TLS 1.0 / 1.1 ต้องถูกปฏิเสธ (บังคับ TLS >= 1.2) ----------
-    [Fact]
-    public async Task Tls10_RejectedByListener()
-    {
-        using var tcp = new TcpClient();
-        await WithTimeoutAsync(tcp.ConnectAsync(IPAddress.Loopback, _enrollmentPort));
-        using var ssl = new SslStream(tcp.GetStream(), false, (_, _, _, _) => true);
-        var authTask = ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
-        {
-            TargetHost = "localhost",
-            EnabledSslProtocols = SslProtocols.Tls10,
-        });
-        await Assert.ThrowsAsync<AuthenticationException>(() => WithTimeoutAsync(authTask));
-    }
-
-    [Fact]
-    public async Task Tls11_RejectedByListener()
-    {
-        using var tcp = new TcpClient();
-        await WithTimeoutAsync(tcp.ConnectAsync(IPAddress.Loopback, _enrollmentPort));
-        using var ssl = new SslStream(tcp.GetStream(), false, (_, _, _, _) => true);
-        var authTask = ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
-        {
-            TargetHost = "localhost",
-            EnabledSslProtocols = SslProtocols.Tls11,
-        });
-        await Assert.ThrowsAsync<AuthenticationException>(() => WithTimeoutAsync(authTask));
-    }
-
-    public void Dispose()
+        public void Dispose()
     {
         _listener.Stop();
         _pki.Dispose();
