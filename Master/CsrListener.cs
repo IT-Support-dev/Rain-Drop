@@ -365,30 +365,14 @@ internal sealed class CsrListener : IDisposable
 
     private static async Task<string> ReadLineWithTimeoutAsync(StreamReader sr)
     {
-        // อ่านทีละตัวเพื่อจำกัดความยาวบรรทendueกัน DoS (8 KB) และจำกัดเวลาต่อขั้นตอน (10 วินาที)
-        var sb = new StringBuilder();
-        int totalBytes = 0;
-        char[] one = new char[1];
-        while (true)
-        {
-            var readTask = sr.ReadAsync(one, 0, 1);
-            var timeout = Task.Delay(StepTimeoutSeconds * 1000);
-            if (await Task.WhenAny(readTask, timeout) != readTask)
-                throw new TimeoutException($"อ่านบรรทendueหมดเวลา ({StepTimeoutSeconds} วินาที)");
-            int ch = await readTask;
-            if (ch == 0) break;
-            if (one[0] == '\n') break;
-            if (one[0] != '\r')
-            {
-                sb.Append(one[0]);
-                totalBytes++;
-                if (totalBytes > MaxLineLength)
-                {
-                    throw new InvalidDataException($"บรรท่วยาวเกินกำหนด ({MaxLineLength} bytes) ถูกตัดการเชื่อมต่อ");
-                }
-            }
-        }
-        return sb.ToString();
+        var readTask = sr.ReadLineAsync(); // อ่านทั้งบรรทัด (SslStream.ReadAsync(char[],0,1) อาจคืน 0 ก่อนเวลาอันควรทำให้เข้าใจผิดว่า stream ปิด)
+        var timeout = Task.Delay(StepTimeoutSeconds * 1000);
+        if (await Task.WhenAny(readTask, timeout) != readTask)
+            throw new TimeoutException($"อ่านบรรทendueหมดเวลา ({StepTimeoutSeconds} วินาที)");
+        var line = await readTask;
+        if (line is not null && line.Length > MaxLineLength)
+            throw new InvalidDataException($"บรรท่วยาวเกินกำหนด ({MaxLineLength} bytes) ถูกตัดการเชื่อมต่อ");
+        return line;
     }
 
     private void RecordFailure(string? ip, string? code, string reason)
