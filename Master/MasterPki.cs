@@ -218,8 +218,8 @@ internal sealed class MasterPki : IDisposable
     {
         lock (_gate)
         {
-            // NotBefore ย้อนหลัง 1 วัน กันปัญหานาฬิกาเครื่องลูกไม่ตรงกัน
-            var notBefore = DateTime.UtcNow.AddDays(-1);
+            // NotBefore = ปัจจุบัน (ห้ามย้อนก่อน CA.NotBefore ไม่งั้น .NET จะปฏิเสธการสร้างใบรับรอง)
+            var notBefore = DateTime.UtcNow;
             notAfterUtc = DateTime.UtcNow.AddYears(1);
 
             var issued = RepoCertificates.SignCsr(csr, _ca, _caKey, machineId, machineName, addresses, notBefore, notAfterUtc);
