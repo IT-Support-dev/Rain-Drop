@@ -89,9 +89,9 @@ public class CsrListenerTests : IDisposable
         {
             try
             {
-                var security = File.GetAccessControl(file);
+                var security = new FileInfo(file).GetAccessControl();
                 security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
-                File.SetAccessControl(file, security);
+                new FileInfo(file).SetAccessControl(security);
             }
             catch { }
         }
@@ -99,17 +99,17 @@ public class CsrListenerTests : IDisposable
         {
             try
             {
-                var security = Directory.GetAccessControl(dir);
+                var security = new DirectoryInfo(dir).GetAccessControl();
                 security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
-                Directory.SetAccessControl(dir, security);
+                new DirectoryInfo(dir).SetAccessControl(security);
             }
             catch { }
         }
         try
         {
-            var security = Directory.GetAccessControl(path);
+            var security = new DirectoryInfo(path).GetAccessControl();
             security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
-            Directory.SetAccessControl(path, security);
+            new DirectoryInfo(path).SetAccessControl(security);
         }
         catch { }
 
