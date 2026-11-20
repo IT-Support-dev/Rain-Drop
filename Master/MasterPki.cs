@@ -46,24 +46,8 @@ internal sealed class MasterPki : IDisposable
     /// <summary>สร้าง instance สำหรับโหมดตัวอย่าง UI (ไม่เขียนที่เก็บ ไม่เชื่อมต่อเครือข่าย)</summary>
     internal static MasterPki CreateForPreview(ECDsa caKey, X509Certificate2 ca, X509Certificate2 client)
     {
-        // Copy/detach กุญแจและใบรับรองเพื่อไม่ให้การ.dispose ของตัวต้นทางทำให้ handle invalid
-        // (เช่นเดียวกับ LoadOrCreate() ที่กันผลข้างเคียงจาก using-block ของตัวเรียก)
-        var exportedCaKey = caKey.ExportPkcs8PrivateKey();
-        var detachedCaKey = ECDsa.Create();
-        detachedCaKey.ImportPkcs8PrivateKey(exportedCaKey, out _);
-        CryptographicOperations.ZeroMemory(exportedCaKey);
-
-        var detachedCa = new X509Certificate2(ca.RawData);
-
-        var exportedClientKey = client.GetECDsaPrivateKey()!.ExportPkcs8PrivateKey();
-        var detachedClientKey = ECDsa.Create();
-        detachedClientKey.ImportPkcs8PrivateKey(exportedClientKey, out _);
-        CryptographicOperations.ZeroMemory(exportedClientKey);
-
-        var detachedClient = new X509Certificate2(client.RawData).CopyWithPrivateKey(detachedClientKey);
-
         var state = new ProtectedState(new List<IssuedAgent>(), new RevocationList(1, new List<string>()));
-        return new MasterPki(detachedCaKey, detachedCa, detachedClient, state);
+        return new MasterPki(caKey, ca, client, state);
     }
 
     public static MasterPki LoadOrCreate()

@@ -32,9 +32,10 @@ public class CsrListenerTests : IDisposable
         _tempFolder = Path.Combine(Path.GetTempPath(), $"raindrop-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempFolder);
 
-        using var ca = RepoCertificates.CreateCa();
-        using var caKey = ca.GetECDsaPrivateKey()!;
-        using var client = RepoCertificates.IssueClient(ca, caKey);
+        // ไม่ใช้ using-block กับ ca/caKey/client — ปล่อยให้ _pki เป็นเจ้าของและ dispose ตอน CsrListenerTests.Dispose()
+        var ca = RepoCertificates.CreateCa();
+        var caKey = ca.GetECDsaPrivateKey()!;
+        var client = RepoCertificates.IssueClient(ca, caKey);
         _pki = MasterPki.CreateForPreview(caKey, ca, client);
 
         _codes = new PairingCodeStore();
