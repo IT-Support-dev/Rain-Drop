@@ -334,8 +334,9 @@ internal sealed class CsrListener : IDisposable
             catch (Exception ex)
             {
                 // InvalidDataException คือ protocol violation ตามปกติ (เช่น ส่งบรรทุดยาวเกิน 8 KB)
-                // ไม่ใช่ exception ที่ไม่คาดคิด → ไม่ raise ExceptionOccurred
-                if (ex is not InvalidDataException)
+                // IOException/SocketException คือการตัดการเชื่อมต่อตามปกติ (client ปิด socket ก่อนอ่านจบ)
+                // สองกรณีนี้ไม่ใช่ exception ที่ไม่คาดคิด → ไม่ raise ExceptionOccurred
+                if (ex is not InvalidDataException and not IOException and not SocketException)
                 {
                     ExceptionOccurred?.Invoke(ex);
                     Diag.Error("CsrListener.HandleClientAsync", ex.ToString(), ex);
@@ -452,6 +453,7 @@ internal sealed class CsrListener : IDisposable
         finally
         {
             Array.Clear(pfx);
+            cert.Dispose(); // กัน handle leak ของ cert ต้นฉบับหลัง export PFX แล้ว
         }
     }
 
