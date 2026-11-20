@@ -210,7 +210,7 @@ internal sealed class MasterPki : IDisposable
             serial = RepoCertificates.Serial(issued);
             _issued.Add(new IssuedAgent(machineId, machineName, serial, notAfterUtc));
             SaveState();
-            Audit.Append(new AuditEvent("enroll-csr", machineName, "ok", serial));
+            Audit.Append(new AuditEvent("enroll", machineName, "ok", serial));
             return issued;
         }
     }
