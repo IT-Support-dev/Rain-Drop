@@ -268,7 +268,7 @@ public static class RepoCertificates
         X509Certificate2 caForSigning = ca.HasPrivateKey ? ca : ca.CopyWithPrivateKey(caKey);
         try
         {
-            using var issued = csr.Create(caForSigning, notBefore, notAfter, serial);
+            var issued = csr.Create(caForSigning, notBefore, notAfter, serial);
             return issued;
         }
         finally
