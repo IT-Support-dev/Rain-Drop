@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using RainDrop.Agent;
 using RainDrop.Shared;
@@ -15,6 +17,45 @@ public class AgentConfigTests
     private static string TempDir() =>
         Path.Combine(Path.GetTempPath(), "raindrop-tests-" + Guid.NewGuid().ToString("N"));
 
+    /// <summary>คืนสิทธิ์ให้ผู้ใช้ปัจจุบันทั่วทั้งต้นไม้โฟลเดอร์แล้วจึงลบ
+    /// ใช้กับเทสต์ที่แตะ HardenFolder ซึ่งตั้ง ACL ปิดกั้น Users ไม่ให้ลบไฟล์ใน private\\
+    /// ระดับ production ไม่ได้แตะ — ACL เดิมยังคงเข้มงวดเหมือนเดิม</summary>
+    private static void DeleteDirectoryWithPermissions(string path)
+    {
+        if (!Directory.Exists(path)) return;
+
+        var currentUser = WindowsIdentity.GetCurrent().User!;
+        foreach (var file in Directory.GetFiles(path, "*.*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                var security = File.GetAccessControl(file);
+                security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
+                File.SetAccessControl(file, security);
+            }
+            catch { }
+        }
+        foreach (var dir in Directory.GetDirectories(path, "*.*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                var security = Directory.GetAccessControl(dir);
+                security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
+                Directory.SetAccessControl(dir, security);
+            }
+            catch { }
+        }
+        try
+        {
+            var security = Directory.GetAccessControl(path);
+            security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
+            Directory.SetAccessControl(path, security);
+        }
+        catch { }
+
+        Directory.Delete(path, recursive: true);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("short")]
@@ -30,7 +71,7 @@ public class AgentConfigTests
         }
         finally
         {
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(dir)) DeleteDirectoryWithPermissions(dir);
         }
     }
 
@@ -44,7 +85,7 @@ public class AgentConfigTests
         }
         finally
         {
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(dir)) DeleteDirectoryWithPermissions(dir);
         }
     }
 
@@ -67,7 +108,7 @@ public class AgentConfigTests
         }
         finally
         {
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(dir)) DeleteDirectoryWithPermissions(dir);
         }
     }
 
@@ -98,7 +139,7 @@ public class AgentConfigTests
         }
         finally
         {
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(dir)) DeleteDirectoryWithPermissions(dir);
         }
     }
 }

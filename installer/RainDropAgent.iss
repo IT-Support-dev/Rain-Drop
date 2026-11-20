@@ -164,6 +164,8 @@ end;
 function InitializeSetup(): Boolean;
 var
   p, m, c: String;
+  ResultCode: Integer;
+  PrivDir: String;
 begin
   Result := True;
   if not WizardSilent then Exit;
@@ -199,7 +201,14 @@ begin
     Exit;
   end;
 
-  // เขียนรหัสลงไฟล์ชั่วคราวใน private\ (จะถูกลบโดยโปรเซสลูกหลังอ่านแล้ว)
+  // 1) สร้างโฟลเดอร์ private\ ก่อนตั้ง ACL และเขียนรหัส
+  PrivDir := ExpandConstant('{commonappdata}\\RainDrop\private');
+  Exec(ExpandConstant('{sys}\cmd.exe'), '/c mkdir "' + PrivDir + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 2) ตั้ง ACL ของโฟลเดอร์ private\ (SYSTEM + admins เท่านั้น Users อ่านไม่ได้) ก่อนเขียนรหัสลงไป
+  Exec(ExpandConstant('{sys}\icacls.exe'), '"' + PrivDir + '" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F""', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 3) เขียนรหัสลงไฟล์ชั่วคราวใน private\ (จะถูกลบโดยโปรเซสลูกหลังอ่านแล้ว)
   WriteCodeFile(c);
 end;
 
