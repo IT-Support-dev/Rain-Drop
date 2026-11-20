@@ -227,4 +227,29 @@ public sealed class PairingCodeStore : IDisposable
             sb.Append(Base32Alphabet[(value << (5 - bits)) & 0x1F]);
         return sb.ToString();
     }
+
+    /// <summary>ถอดรหัส base32 กลับเป็นไบต์ต้นฉบับ (ใช้โดย Agent ฝั่งลูกเพื่อคำนวณ K ให้ตรงกับ Master)</summary>
+    public static byte[] Base32Decode(string code)
+    {
+        if (string.IsNullOrEmpty(code))
+            throw new ArgumentException("รหัสจับคู่ว่างเปล่า", nameof(code));
+
+        var bytes = new List<byte>();
+        int bits = 0, value = 0;
+        foreach (char c in code)
+        {
+            int index = Base32Alphabet.IndexOf(c);
+            if (index < 0)
+                throw new FormatException($"ตัวอักษร base32 ไม่ถูกต้อง: {c}");
+            value = (value << 5) | index;
+            bits += 5;
+            if (bits >= 8)
+            {
+                bits -= 8;
+                bytes.Add((byte)(value >> bits));
+                value &= (1 << bits) - 1;
+            }
+        }
+        return bytes.ToArray();
+    }
 }
