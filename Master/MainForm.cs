@@ -184,7 +184,7 @@ internal sealed class MainForm : Form
             Height = Theme.ButtonHeightLarge,
             Margin = new Padding(0, Theme.Space2, 0, Theme.Space2),
         };
-        btnAddDevice.Click += async (_, _) => await AddDeviceClicked();
+        btnAddDevice.Click += (_, _) => AddDeviceClicked();
         sidebar.Controls.Add(btnAddDevice);
 
         // ปุ่มท้ายแถบ: ตั้งค่า / ชุมชน เป็นข้อความธรรมดา ชิดซ้ายแนวเดียวกับทุกอย่าง
@@ -802,7 +802,7 @@ internal sealed class MainForm : Form
 
     // ---------- C2b: เพิ่มเครื่องลูกใหม่ด้วย pairing code ----------
 
-    private async System.Threading.Tasks.Task AddDeviceClicked()
+    private void AddDeviceClicked()
     {
         if (_uiPreview)
         {

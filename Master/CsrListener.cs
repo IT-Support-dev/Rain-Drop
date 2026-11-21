@@ -58,11 +58,6 @@ internal sealed class CsrListener : IDisposable
 
     public void Start()
     {
-        StartAsync().GetAwaiter().GetResult();
-    }
-
-    private async Task StartAsync()
-    {
         lock (_gate)
         {
             if (_running) return;
