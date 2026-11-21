@@ -20,23 +20,15 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Build (Debug)
+        shell: pwsh
+        run: |
+          dotnet build RainDrop.sln -c Debug --nologo -p:TreatWarningsAsErrors=true
+
       - name: Build (Release)
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Continue'
-          dotnet build -c Release > build.log 2>&1
-          $code = $LASTEXITCODE
-          Get-Content build.log | ForEach-Object { Write-Host $_ }
-
-          # แสดงทุก warning/error เป็น annotation เพื่ออ่านย้อนหลังได้ผ่าน API
-          $diags = Select-String -Path build.log -Pattern '\b(warning|error)\s+[A-Z]+[0-9]+' |
-                   ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique
-          foreach ($d in $diags) {
-            $safe = $d.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
-            if ($d -match '\berror\s+[A-Z]+[0-9]+') { Write-Host "::error::$safe" }
-            else { Write-Host "::warning::$safe" }
-          }
-          exit $code
+          dotnet build RainDrop.sln -c Release --nologo -p:TreatWarningsAsErrors=true
 
       - name: Test
         run: dotnet test Tests/Tests.csproj -c Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
