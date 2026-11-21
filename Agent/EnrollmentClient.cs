@@ -90,7 +90,8 @@ internal static class EnrollmentClient
             channelBinding = EnrollmentChannel.DeriveChannelBindingFromCert(serverKey);
 
             // K = HKDF-SHA256(ikm=codeBytes, salt=channelBinding, info="RainDrop-enroll-v1")
-            byte[] codeBytes = Encoding.UTF8.GetBytes(code);
+            // codeBytes ต้องเท่ากับที่ Master เก็บใน PairingCodeStore (10 ไบต์สุ่มที่ encode เป็น base32 string)
+            byte[] codeBytes = PairingCodeStore.Base32Decode(code);
             byte[] k = EnrollmentChannel.HkdfSha256(codeBytes, channelBinding, EnrollmentChannel.Info, 32);
             CryptographicOperations.ZeroMemory(codeBytes);
 
