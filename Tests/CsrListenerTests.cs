@@ -79,44 +79,6 @@ public class CsrListenerTests : IDisposable
         await task;
     }
 
-    /// <summary>คืนสิทธิ์ให้ผู้ใช้ปัจจุบันทั่วทั้งต้นไม้โฟลเดอร์แล้วจึงลบ
-    /// ใช้กับเทสต์ที่แตะ HardenFolder ซึ่งตั้ง ACL ปิดกั้น Users ไม่ให้ลบไฟล์ใน private    /// ระดับ production ไม่ได้แตะ — ACL เดิมยังคงเข้มงวดเหมือนเดิม</summary>
-    private static void DeleteDirectoryWithPermissions(string path)
-    {
-        if (!Directory.Exists(path)) return;
-
-        var currentUser = WindowsIdentity.GetCurrent().User!;
-        foreach (var file in Directory.GetFiles(path, "*.*", SearchOption.AllDirectories))
-        {
-            try
-            {
-                var security = new FileInfo(file).GetAccessControl();
-                security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
-                new FileInfo(file).SetAccessControl(security);
-            }
-            catch { }
-        }
-        foreach (var dir in Directory.GetDirectories(path, "*.*", SearchOption.AllDirectories))
-        {
-            try
-            {
-                var security = new DirectoryInfo(dir).GetAccessControl();
-                security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
-                new DirectoryInfo(dir).SetAccessControl(security);
-            }
-            catch { }
-        }
-        try
-        {
-            var security = new DirectoryInfo(path).GetAccessControl();
-            security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
-            new DirectoryInfo(path).SetAccessControl(security);
-        }
-        catch { }
-
-        Directory.Delete(path, recursive: true);
-    }
-
     // ---------- PairingCodeStore (ไม่ต้องใช้ listener) ----------
 
     [Fact]
@@ -728,7 +690,8 @@ public class CsrListenerTests : IDisposable
             var (ok, error) = await WithTimeoutAsync(EnrollmentClient.Run(
                 agentHome,
                 $"127.0.0.1:{port}",
-                codeFile));
+                codeFile,
+                keepCurrentUser: true));
 
             Assert.True(ok, "Enrollment ต้องสำเร็จ: " + error);
             Assert.Empty(handshakeExceptions);
@@ -773,7 +736,7 @@ public class CsrListenerTests : IDisposable
         // ไม่มี _listener ที่สร้างไว้ใน constructor แล้ว แต่ละเทสต์สร้างและ stop เอง
         _pki.Dispose();
         _audit.Dispose();
-        try { Directory.Delete(_tempFolder, true); } catch { }
+        Directory.Delete(_tempFolder, true);
     }
 }
 

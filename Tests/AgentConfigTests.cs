@@ -17,45 +17,6 @@ public class AgentConfigTests
     private static string TempDir() =>
         Path.Combine(Path.GetTempPath(), "raindrop-tests-" + Guid.NewGuid().ToString("N"));
 
-    /// <summary>คืนสิทธิ์ให้ผู้ใช้ปัจจุบันทั่วทั้งต้นไม้โฟลเดอร์แล้วจึงลบ
-    /// ใช้กับเทสต์ที่แตะ HardenFolder ซึ่งตั้ง ACL ปิดกั้น Users ไม่ให้ลบไฟล์ใน private\\
-    /// ระดับ production ไม่ได้แตะ — ACL เดิมยังคงเข้มงวดเหมือนเดิม</summary>
-    private static void DeleteDirectoryWithPermissions(string path)
-    {
-        if (!Directory.Exists(path)) return;
-
-        var currentUser = WindowsIdentity.GetCurrent().User!;
-        foreach (var file in Directory.GetFiles(path, "*.*", SearchOption.AllDirectories))
-        {
-            try
-            {
-                var security = new FileInfo(file).GetAccessControl();
-                security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
-                new FileInfo(file).SetAccessControl(security);
-            }
-            catch { }
-        }
-        foreach (var dir in Directory.GetDirectories(path, "*.*", SearchOption.AllDirectories))
-        {
-            try
-            {
-                var security = new DirectoryInfo(dir).GetAccessControl();
-                security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
-                new DirectoryInfo(dir).SetAccessControl(security);
-            }
-            catch { }
-        }
-        try
-        {
-            var security = new DirectoryInfo(path).GetAccessControl();
-            security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl, AccessControlType.Allow));
-            new DirectoryInfo(path).SetAccessControl(security);
-        }
-        catch { }
-
-        Directory.Delete(path, recursive: true);
-    }
-
     [Theory]
     [InlineData("")]
     [InlineData("short")]
@@ -65,13 +26,13 @@ public class AgentConfigTests
         string dir = TempDir();
         try
         {
-            Assert.False(AgentConfig.WriteInitial(dir, password, 11400, "", out string error));
+            Assert.False(AgentConfig.WriteInitial(dir, password, 11400, "", out string error, keepCurrentUser: true));
             Assert.NotEqual("", error);
             Assert.False(File.Exists(Path.Combine(dir, "agent.json")));
         }
         finally
         {
-            if (Directory.Exists(dir)) DeleteDirectoryWithPermissions(dir);
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
     }
 
@@ -81,11 +42,11 @@ public class AgentConfigTests
         string dir = TempDir();
         try
         {
-            Assert.False(AgentConfig.WriteInitial(dir, "pass\nword123", 11400, "", out _));
+            Assert.False(AgentConfig.WriteInitial(dir, "pass\nword123", 11400, "", out _, keepCurrentUser: true));
         }
         finally
         {
-            if (Directory.Exists(dir)) DeleteDirectoryWithPermissions(dir);
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
     }
 
@@ -95,7 +56,7 @@ public class AgentConfigTests
         string dir = TempDir();
         try
         {
-            Assert.True(AgentConfig.WriteInitial(dir, "installer-pass", 11500, "192.168.1.10", out _));
+            Assert.True(AgentConfig.WriteInitial(dir, "installer-pass", 11500, "192.168.1.10", out _, keepCurrentUser: true));
 
             string json = File.ReadAllText(Path.Combine(dir, "agent.json"));
             var config = JsonSerializer.Deserialize<AgentConfig>(json)
@@ -108,7 +69,7 @@ public class AgentConfigTests
         }
         finally
         {
-            if (Directory.Exists(dir)) DeleteDirectoryWithPermissions(dir);
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
     }
 
@@ -118,7 +79,7 @@ public class AgentConfigTests
         string dir = TempDir();
         try
         {
-            Assert.True(AgentConfig.WriteInitial(dir, "installer-pass", 11400, "", out _));
+            Assert.True(AgentConfig.WriteInitial(dir, "installer-pass", 11400, "", out _, keepCurrentUser: true));
 
             string credPath = Path.Combine(dir, "private", "credentials.json");
             Assert.True(File.Exists(credPath));
@@ -139,7 +100,42 @@ public class AgentConfigTests
         }
         finally
         {
-            if (Directory.Exists(dir)) DeleteDirectoryWithPermissions(dir);
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    /// <summary>ยืนยันว่า keepCurrentUser=false (ค่าเริ่มต้น production) ตัดสิทธิ์ FullControl
+    /// ของผู้ใช้ปัจจุบันออกจาก private\ จริง — ไม่ให้เทสต์หรือมัลแวร์ที่รันฐานะผู้ใช้
+    /// ทั่วไปอ่าน/เขียนไฟล์ลับใน private\ ได้</summary>
+    [Fact]
+    public void HardenFolder_KeepCurrentUserFalse_CutsUserFullControl()
+    {
+        string dir = TempDir();
+        try
+        {
+            // keepCurrentUser ค่าเริ่มต้นคือ false — ต้องตัดสิทธิ์ผู้ใช้ทั่วไป
+            Assert.True(AgentConfig.WriteInitial(dir, "installer-pass", 11400, "", out _));
+
+            string privateDir = Path.Combine(dir, "private");
+            var security = new DirectoryInfo(privateDir).GetAccessControl();
+            var currentUser = WindowsIdentity.GetCurrent().User!;
+
+            var userHasFullControl = security.AccessRules
+                .Cast<FileSystemAccessRule>()
+                .Any(r => r.IdentityReference.Value.Equals(currentUser.Value, StringComparison.OrdinalIgnoreCase)
+                    && r.AccessControlType == AccessControlType.Allow
+                    && (r.FileSystemRights & FileSystemRights.FullControl) == FileSystemRights.FullControl);
+
+            Assert.False(userHasFullControl,
+                "keepCurrentUser=false ต้องไม่ให้ FullControl แก่ผู้ใช้ปัจจุบันบน private\\");
+        }
+        finally
+        {
+            // เปิดสิทธิ์คืนด้วย keepCurrentUser: true แล้วค่อยลบ (กันโฟลเดอร์ถูกล็อกจาก HardenFolder)
+            if (Directory.Exists(dir))
+                AgentConfig.WriteInitial(dir, "cleanup-pass", 11400, "", out _, keepCurrentUser: true);
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, true);
         }
     }
 }

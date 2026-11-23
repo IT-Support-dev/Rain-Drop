@@ -18,7 +18,8 @@ internal static class EnrollmentClient
     private const int StepTimeoutSeconds = 10;  // timeout ต่อขั้นตอนของโปรโตคอล
 
     /// <summary>รัน enrollment แบบ pairing code: อ่านรหัสจากไฟล์ชั่วคราวแล้วเชื่อมต่อ Master พอร์ตแยก</summary>
-    public static async Task<(bool Success, string Error)> Run(string folder, string masterAddress, string? codeFilePath = null)
+    public static async Task<(bool Success, string Error)> Run(string folder, string masterAddress, string? codeFilePath = null,
+        bool keepCurrentUser = false)
     {
         // --- อ่านรหัสจากไฟล์ชั่วคราว (ไม่รับจาก command line กันหลุดลง log) ---
         string code;
@@ -184,8 +185,8 @@ internal static class EnrollmentClient
             Directory.CreateDirectory(folder);
             string privateDir = Path.Combine(folder, "private");
             Directory.CreateDirectory(privateDir);
-            AgentConfig.HardenFolder(folder, usersRead: true);
-            AgentConfig.HardenFolder(privateDir, usersRead: false);
+            AgentConfig.HardenFolder(folder, usersRead: true, keepCurrentUser);
+            AgentConfig.HardenFolder(privateDir, usersRead: false, keepCurrentUser);
 
             File.WriteAllBytes(Path.Combine(privateDir, "agent-cert.der"), agentCertDer);
             File.WriteAllBytes(Path.Combine(privateDir, "agent-key.pkcs8"), agentKey.ExportPkcs8PrivateKey());

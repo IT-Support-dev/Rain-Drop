@@ -20,6 +20,10 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Show .NET SDK version
+        shell: pwsh
+        run: dotnet --version
+
       - name: Build (Debug)
         shell: pwsh
         run: |
@@ -46,12 +50,15 @@ jobs:
           Write-Host "::notice title=Test results::$summary"
           "## Test results`n`n$summary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-          # ถ้ามีเทสต์ล้ม ให้รายงานชื่อเทสต์ + ข้อความ error เป็น annotation (เฟส B ข้อ 12)
-          foreach ($r in $x.TestRun.Results.UnitTestResult) {
-            if ($r.outcome -ne 'Passed') {
+          # ถ้ามีเทสต์ล้ม ให้รายงานชื่อเทสต์ + ข้อความ error ทั้งใน annotation และ step summary (เฟส B ข้อ 12)
+          $failed = $x.TestRun.Results.UnitTestResult | Where-Object { $_.outcome -ne 'Passed' }
+          if ($failed) {
+            "## เทสต์ที่ล้ม`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            foreach ($r in $failed) {
               $msg = [string]$r.Output.ErrorInfo.Message
               $safe = ($r.testName + ' :: ' + $msg).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
               Write-Host "::error title=Test $($r.outcome)::$safe"
+              "- **$($r.testName)**: $msg`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             }
           }
 
