@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 namespace RainDrop.Shared;
 
@@ -65,14 +66,30 @@ public sealed class AuditLog : IDisposable
                 string payload = JsonSerializer.Serialize(line);
                 line = line with { Hash = HashLine(payload) };
                 string json = JsonSerializer.Serialize(line);
-                using (var stream = new FileStream(CurrentPath, FileMode.Append, FileAccess.Write, FileShare.Read))
-                using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+                // Retry กรณีไฟล์ถูกล็อกชั่วคราวโดยโปรเซสอื่น (เช่น แอนตี้ไวรสสแกนไฟล์หลังเขียนเสร็จ)
+                Exception? lastEx = null;
+                for (int attempt = 0; attempt < 5; attempt++)
                 {
-                    writer.WriteLine(json);
-                    writer.Flush();
-                    stream.Flush(flushToDisk: true);
+                    try
+                    {
+                        using (var stream = new FileStream(CurrentPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+                        using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+                        {
+                            writer.WriteLine(json);
+                            writer.Flush();
+                            stream.Flush(flushToDisk: true);
+                        }
+                        _previous = HashLine(json);
+                        lastEx = null;
+                        break;
+                    }
+                    catch (IOException ex)
+                    {
+                        lastEx = ex;
+                        Thread.Sleep(50);
+                    }
                 }
-                _previous = HashLine(json);
+                if (lastEx is not null) throw lastEx;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
