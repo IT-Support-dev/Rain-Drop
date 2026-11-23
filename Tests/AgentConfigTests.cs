@@ -120,7 +120,7 @@ public class AgentConfigTests
             var security = new DirectoryInfo(privateDir).GetAccessControl();
             var currentUser = WindowsIdentity.GetCurrent().User!;
 
-            var userHasFullControl = security.AccessRules
+            var userHasFullControl = security.GetAccessRules(true, true, typeof(NTAccount))
                 .Cast<FileSystemAccessRule>()
                 .Any(r => r.IdentityReference.Value.Equals(currentUser.Value, StringComparison.OrdinalIgnoreCase)
                     && r.AccessControlType == AccessControlType.Allow

@@ -724,8 +724,8 @@ public class CsrListenerTests : IDisposable
         {
             listener.Stop();
             Assert.Empty(handshakeExceptions);
-            // คืนสิทธิ์ก่อนลบ เพราะ EnrollmentClient.Run เรียก HardenFolder (ACL ปิดกั้น Users)
-            if (Directory.Exists(agentHome)) DeleteDirectoryWithPermissions(agentHome);
+            // เปิดสิทธิ์คืนแล้วค่อยลบ เพราะ EnrollmentClient.Run เรียก HardenFolder (ACL ปิดกั้น Users)
+            if (Directory.Exists(agentHome)) Directory.Delete(agentHome, true);
         }
     }
 
