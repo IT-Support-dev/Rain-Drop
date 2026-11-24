@@ -185,8 +185,8 @@ internal static class EnrollmentClient
             Directory.CreateDirectory(folder);
             string privateDir = Path.Combine(folder, "private");
             Directory.CreateDirectory(privateDir);
-            AgentConfig.HardenFolder(folder, usersRead: true, keepCurrentUser);
-            AgentConfig.HardenFolder(privateDir, usersRead: false, keepCurrentUser);
+            Program.HardenFolder(folder, usersRead: true, keepCurrentUser);
+            Program.HardenFolder(privateDir, usersRead: false, keepCurrentUser);
 
             File.WriteAllBytes(Path.Combine(privateDir, "agent-cert.der"), agentCertDer);
             File.WriteAllBytes(Path.Combine(privateDir, "agent-key.pkcs8"), agentKey.ExportPkcs8PrivateKey());
