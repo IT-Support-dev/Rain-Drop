@@ -127,7 +127,7 @@ public class AgentConfigTests
             string privateDir = Path.Combine(dir, "private");
             Directory.CreateDirectory(privateDir);
 
-            Program.HardenFolder(privateDir, usersRead: false, keepCurrentUser: false);
+            AgentConfig.HardenFolder(privateDir, usersRead: false, keepCurrentUser: false);
 
             var security = new DirectoryInfo(privateDir).GetAccessControl();
             var currentUser = WindowsIdentity.GetCurrent().User!;
@@ -174,7 +174,7 @@ public class AgentConfigTests
             {
                 string cleanupPrivate = Path.Combine(dir, "private");
                 if (Directory.Exists(cleanupPrivate))
-                    Program.HardenFolder(cleanupPrivate, usersRead: false, keepCurrentUser: true);
+                    AgentConfig.HardenFolder(cleanupPrivate, usersRead: false, keepCurrentUser: true);
                 Directory.Delete(dir, true);
             }
         }
@@ -191,7 +191,7 @@ public class AgentConfigTests
             string privateDir = Path.Combine(dir, "private");
             Directory.CreateDirectory(privateDir);
 
-            Program.HardenFolder(privateDir, usersRead: false, keepCurrentUser: true);
+            AgentConfig.HardenFolder(privateDir, usersRead: false, keepCurrentUser: true);
 
             var security = new DirectoryInfo(privateDir).GetAccessControl();
             var currentUser = WindowsIdentity.GetCurrent().User!;
