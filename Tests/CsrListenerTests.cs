@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
+using RainDrop.Agent;
 using RainDrop.Master;
 using RainDrop.Shared;
 using Xunit;
@@ -29,9 +30,10 @@ public class CsrListenerTests : IDisposable
         _tempFolder = Path.Combine(Path.GetTempPath(), $"raindrop-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempFolder);
 
-        using var ca = RepoCertificates.CreateCa();
-        using var caKey = ca.GetECDsaPrivateKey()!;
-        using var client = RepoCertificates.IssueClient(ca, caKey);
+        // ไม่ใช้ using-block กับ ca/caKey/client — ปล่อยให้ _pki เป็นเจ้าของและ dispose ตอน CsrListenerTests.Dispose()
+        var ca = RepoCertificates.CreateCa();
+        var caKey = ca.GetECDsaPrivateKey()!;
+        var client = RepoCertificates.IssueClient(ca, caKey);
         _pki = MasterPki.CreateForPreview(caKey, ca, client);
 
         _codes = new PairingCodeStore();
@@ -300,7 +302,7 @@ public class CsrListenerTests : IDisposable
     }
 
     // ---------- (ก) MITM relay: channel binding ต่างกัน → HMAC ไม่ผ่าน ----------
-    [Fact(Skip = "ต้องดีบักบน Windows จริงที่มี dotnet SDK; ได้ unexpected EOF บน CI headless (SslStream read/write บน loopback)")]
+    [Fact]
     public async Task Mitm_Relay_Loopback_TwoTlsStreams_Fails()
     {
         string code = _codes.CreateCode();
@@ -308,6 +310,8 @@ public class CsrListenerTests : IDisposable
         Assert.NotNull(codeBytes);
 
         var (listener, port) = StartListenerOnFreePort();
+        var handshakeExceptions = new List<Exception>();
+        listener.ExceptionOccurred += ex => handshakeExceptions.Add(ex);
         try
         {
             using var tcp = new TcpClient();
@@ -354,8 +358,8 @@ public class CsrListenerTests : IDisposable
         }
         finally
         {
-            // ถ้า listener ตัวนี้ยังไม่ถูก stop ให้ stop ตอนจบเทสต์
-            // (StartListenerOnFreePort สร้างใหม่ทุกครั้ง จึงต้อง stop ทุกครั้ง)
+            listener.Stop();
+            Assert.Empty(handshakeExceptions);
         }
     }
 
@@ -363,10 +367,12 @@ public class CsrListenerTests : IDisposable
     // .NET 8 ไม่มี SslProtocols.Tls10/Tls11 จึงไม่สามารถบังคับ client เสนอเวอร์ชันเก่าได้
     // วิธีที่ทำได้: client เสนอโดยไม่จำกัดเวอร์ชัน (SslProtocols.None) server บังคับ TLS 1.2+
     // -> protocol ที่ตกลงต้องไม่ต่ำกว่า Tls12 ตรวจด้วย ssl.SslProtocol หลังเจรจา
-    [Fact(Skip = "ต้องดีบักบน Windows จริงที่มี dotnet SDK; ได้ unexpected EOF บน CI headless (SslStream read/write บน loopback)")]
+    [Fact]
     public async Task Listener_NegotiatesTls12OrHigher()
     {
         var (listener, port) = StartListenerOnFreePort();
+        var handshakeExceptions = new List<Exception>();
+        listener.ExceptionOccurred += ex => handshakeExceptions.Add(ex);
         try
         {
             using var tcp = new TcpClient();
@@ -384,12 +390,13 @@ public class CsrListenerTests : IDisposable
         }
         finally
         {
-            // listener จะถูก stop นอก finally ด้านล่าง
+            listener.Stop();
+            Assert.Empty(handshakeExceptions);
         }
     }
 
     // ---------- (ค) PoP ลายเซ็นผิด -> ไม่เซ็น cert ----------
-    [Fact(Skip = "ต้องดีบักบน Windows จริงที่มี dotnet SDK; ได้ unexpected EOF บน CI headless (SslStream read/write บน loopback)")]
+    [Fact]
     public async Task Pop_WrongSignature_NotSigned()
     {
         string code = _codes.CreateCode();
@@ -397,6 +404,8 @@ public class CsrListenerTests : IDisposable
         Assert.NotNull(codeBytes);
 
         var (listener, port) = StartListenerOnFreePort();
+        var handshakeExceptions = new List<Exception>();
+        listener.ExceptionOccurred += ex => handshakeExceptions.Add(ex);
         try
         {
             using var tcp = new TcpClient();
@@ -461,11 +470,13 @@ public class CsrListenerTests : IDisposable
         }
         finally
         {
+            listener.Stop();
+            Assert.Empty(handshakeExceptions);
         }
     }
 
     // ---------- (ง) ไหล่เต็มถูกต้องทุกขั้นตอน -> Master セ็นคืน ISSUED + CA ----------
-    [Fact(Skip = "ต้องดีบักบน Windows จริงที่มี dotnet SDK; ได้ unexpected EOF บน CI headless (SslStream read/write บน loopback)")]
+    [Fact]
     public async Task FullEnrollment_ValidProofs_IssuedCaReturned()
     {
         string code = _codes.CreateCode();
@@ -473,6 +484,8 @@ public class CsrListenerTests : IDisposable
         Assert.NotNull(codeBytes);
 
         var (listener, port) = StartListenerOnFreePort();
+        var handshakeExceptions = new List<Exception>();
+        listener.ExceptionOccurred += ex => handshakeExceptions.Add(ex);
         try
         {
             using var tcp = new TcpClient();
@@ -545,17 +558,21 @@ public class CsrListenerTests : IDisposable
         }
         finally
         {
+            listener.Stop();
+            Assert.Empty(handshakeExceptions);
         }
     }
 
     // ---------- (จ) รหัสใช้แล้ว / หมดอายุ -> ปฏิเสธก่อนถึงขั้นตรวจ HMAC ----------
-    [Fact(Skip = "ต้องดีบักบน Windows จริงที่มี dotnet SDK; ได้ unexpected EOF บน CI headless (SslStream read/write บน loopback)")]
+    [Fact]
     public async Task UsedCode_RejectedByListener_EvenIfHmacValid()
     {
         string code = _codes.CreateCode();
         Assert.True(_codes.TryConsume(code, out _, out _)); // ใช้ไปแล้ว
 
         var (listener, port) = StartListenerOnFreePort();
+        var handshakeExceptions = new List<Exception>();
+        listener.ExceptionOccurred += ex => handshakeExceptions.Add(ex);
         try
         {
             using var tcp = new TcpClient();
@@ -574,10 +591,12 @@ public class CsrListenerTests : IDisposable
         }
         finally
         {
+            listener.Stop();
+            Assert.Empty(handshakeExceptions);
         }
     }
 
-    [Fact(Skip = "ต้องดีบักบน Windows จริงที่มี dotnet SDK; ได้ unexpected EOF บน CI headless (SslStream read/write บน loopback)")]
+    [Fact]
     public async Task ExpiredCode_RejectedByListener()
     {
         var time = DateTime.UtcNow;
@@ -587,6 +606,8 @@ public class CsrListenerTests : IDisposable
 
         // สร้าง listener ใหม่กับ expiredStore แยกต่างหาก (ไม่แตะ listener ตัวอื่น)
         var (listener, port) = StartListenerOnFreePort(expiredStore);
+        var handshakeExceptions = new List<Exception>();
+        listener.ExceptionOccurred += ex => handshakeExceptions.Add(ex);
         try
         {
             using var tcp = new TcpClient();
@@ -605,17 +626,21 @@ public class CsrListenerTests : IDisposable
         }
         finally
         {
+            listener.Stop();
+            Assert.Empty(handshakeExceptions);
         }
     }
 
     // ---------- (ฉ) บรรท่วยาวเกิน 8 KB -> ถูกตัดการเชื่อมต่อ ----------
-    [Fact(Skip = "ต้องดีบักบน Windows จริงที่มี dotnet SDK; ได้ unexpected EOF บน CI headless (SslStream read/write บน loopback)")]
+    [Fact]
     public async Task OversizedLine_CutsConnection()
     {
         string code = _codes.CreateCode();
         Assert.True(_codes.TryPeek(code, out _, out _));
 
         var (listener, port) = StartListenerOnFreePort();
+        var handshakeExceptions = new List<Exception>();
+        listener.ExceptionOccurred += ex => handshakeExceptions.Add(ex);
         try
         {
             using var tcp = new TcpClient();
@@ -636,6 +661,71 @@ public class CsrListenerTests : IDisposable
         }
         finally
         {
+            listener.Stop();
+            Assert.Empty(handshakeExceptions);
+        }
+    }
+
+    /// <summary>End-to-end: EnrollmentClient.Run จริงต่อ CsrListener จริงบน loopback
+    /// จบด้วย ISSUED + CA และไฟล์ cert ถูกเขียนใน private\\ ตรวจ cert กับ CA ได้</summary>
+    [Fact]
+    public async Task EnrollmentClient_RealCsrListener_EndToEnd_IssuedCaReturned()
+    {
+        string code = _codes.CreateCode();
+        Assert.True(_codes.TryPeek(code, out byte[]? codeBytes, out _));
+        Assert.NotNull(codeBytes);
+
+        string agentHome = Path.Combine(_tempFolder, "agent-home-e2e");
+        Directory.CreateDirectory(agentHome);
+        string codeFile = Path.Combine(agentHome, "enrollment-code.txt");
+        File.WriteAllText(codeFile, code);
+
+        var (listener, port) = StartListenerOnFreePort();
+        var handshakeExceptions = new List<Exception>();
+        listener.ExceptionOccurred += ex => handshakeExceptions.Add(ex);
+        try
+        {
+            var (ok, error) = await WithTimeoutAsync(EnrollmentClient.Run(
+                agentHome,
+                $"127.0.0.1:{port}",
+                codeFile,
+                keepCurrentUser: true));
+
+            Assert.True(ok, "Enrollment ต้องสำเร็จ: " + error);
+            Assert.Empty(handshakeExceptions);
+
+            string privateDir = Path.Combine(agentHome, "private");
+            Assert.True(File.Exists(Path.Combine(privateDir, "agent-cert.der")),
+                "ต้องมี agent-cert.der ใน private\\");
+            Assert.True(File.Exists(Path.Combine(privateDir, "agent-key.pkcs8")),
+                "ต้องมี agent-key.pkcs8 ใน private\\");
+            Assert.True(File.Exists(Path.Combine(privateDir, "ca-cert.der")),
+                "ต้องมี ca-cert.der ใน private\\");
+
+            // agent.json ชี้ไปยัง master address
+            string agentJson = File.ReadAllText(Path.Combine(agentHome, "agent.json"));
+            Assert.Contains(port.ToString(), agentJson);
+
+            // ตรวจ cert กับ CA
+            byte[] agentCertDer = File.ReadAllBytes(Path.Combine(privateDir, "agent-cert.der"));
+            byte[] caCertDer = File.ReadAllBytes(Path.Combine(privateDir, "ca-cert.der"));
+
+            using var agentCert = new X509Certificate2(agentCertDer);
+            using var caCert = new X509Certificate2(caCertDer);
+
+            Assert.NotEqual("", agentCert.Subject);
+            Assert.True(agentCert.NotAfter > DateTime.UtcNow, "Cert ต้องยังไม่หมดอายุ");
+
+            // รหัสต้องถูกกินหลัง enroll สำเร็จ
+            Assert.False(_codes.TryConsume(code, out _, out string? reuseReason));
+            Assert.Equal("รหัสถูกใช้ไปแล้ว", reuseReason);
+        }
+        finally
+        {
+            listener.Stop();
+            Assert.Empty(handshakeExceptions);
+            // เปิดสิทธิ์คืนแล้วค่อยลบ เพราะ EnrollmentClient.Run เรียก HardenFolder (ACL ปิดกั้น Users)
+            if (Directory.Exists(agentHome)) Directory.Delete(agentHome, true);
         }
     }
 
@@ -644,7 +734,7 @@ public class CsrListenerTests : IDisposable
         // ไม่มี _listener ที่สร้างไว้ใน constructor แล้ว แต่ละเทสต์สร้างและ stop เอง
         _pki.Dispose();
         _audit.Dispose();
-        try { Directory.Delete(_tempFolder, true); } catch { }
+        Directory.Delete(_tempFolder, true);
     }
 }
 

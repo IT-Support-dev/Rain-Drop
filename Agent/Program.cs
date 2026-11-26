@@ -138,7 +138,8 @@ internal sealed class AgentConfig
     /// ปฏิเสธรหัสผ่านว่างหรือสั้นกว่า 8 ตัวอักษร — ไม่มีรหัสเริ่มต้น "raindrop" อีกแล้ว
     /// การตั้ง ACL ปิดสิทธิ์เขียนของ Users ทำโดยตัวติดตั้ง (icacls) และ Service ย้ำอีกครั้งตอนเริ่ม
     /// </summary>
-    public static bool WriteInitial(string folder, string password, int port, string hubAddress, out string error)
+    public static bool WriteInitial(string folder, string password, int port, string hubAddress, out string error,
+        bool keepCurrentUser = false)
     {
         error = "";
         if (!PasswordHashing.IsAcceptable(password))
@@ -160,8 +161,8 @@ internal sealed class AgentConfig
 
             // ตั้ง ACL ทันทีที่สร้างโฟลเดอร์ (รันด้วยสิทธิ์ผู้ดูแลตอนติดตั้ง) กันช่วงเวลาที่ไฟล์ hash ยังอ่านได้
             // Service จะย้ำ ACL ซ้ำอีกครั้งตอนเริ่มทำงาน (ServiceStore.EnsureLayout)
-            HardenFolder(folder, usersRead: true);
-            HardenFolder(privateDir, usersRead: false);
+            HardenFolder(folder, usersRead: true, keepCurrentUser);
+            HardenFolder(privateDir, usersRead: false, keepCurrentUser);
 
             File.WriteAllText(Path.Combine(folder, "agent.json"),
                 JsonSerializer.Serialize(new AgentConfig { Port = port, HubAddress = hubAddress }, options));
@@ -185,7 +186,7 @@ internal sealed class AgentConfig
 
     /// <summary>C2a enrollment: validate the password-protected bundle before writing any endpoint secret.</summary>
     public static bool Enroll(string folder, string bundlePath, string bundlePassword, string adminPassword,
-        int port, string hubAddress, out string error)
+        int port, string hubAddress, out string error, bool keepCurrentUser = false)
     {
         error = "";
         if (!PasswordHashing.IsAcceptable(adminPassword)) { error = "admin password rejected"; return false; }
@@ -209,9 +210,9 @@ internal sealed class AgentConfig
                 string privateDir = Path.Combine(folder, "private");
                 Directory.CreateDirectory(privateDir);
                 Directory.CreateDirectory(Path.Combine(privateDir, "audit"));
-                HardenFolder(folder, usersRead: true);
-                HardenFolder(privateDir, usersRead: false);
-                HardenFolder(Path.Combine(privateDir, "audit"), usersRead: false);
+                HardenFolder(folder, usersRead: true, keepCurrentUser);
+                HardenFolder(privateDir, usersRead: false, keepCurrentUser);
+                HardenFolder(Path.Combine(privateDir, "audit"), usersRead: false, keepCurrentUser);
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 File.WriteAllText(Path.Combine(folder, "agent.json"), JsonSerializer.Serialize(new AgentConfig { Port = port, HubAddress = hubAddress }, options));
                 File.WriteAllText(Path.Combine(folder, "challenge-public.pem"), manifest.ChallengePublicKeyPem);
@@ -243,7 +244,7 @@ internal sealed class AgentConfig
     /// ตัด inheritance ออกเพื่อไม่ให้สิทธิ์กว้างจากโฟลเดอร์แม่ (ProgramData) ติดลงมา
     /// ใช้ SID มาตรฐานเพื่อไม่ขึ้นกับภาษาของ Windows
     /// </summary>
-    internal static void HardenFolder(string path, bool usersRead)
+    internal static void HardenFolder(string path, bool usersRead, bool keepCurrentUser = false)
     {
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
@@ -260,6 +261,15 @@ internal sealed class AgentConfig
                 FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None, AccessControlType.Allow));
+        }
+        if (keepCurrentUser)
+        {
+            var currentUser = WindowsIdentity.GetCurrent().User;
+            if (currentUser is not null)
+                security.AddAccessRule(new FileSystemAccessRule(currentUser,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
         }
         new DirectoryInfo(path).SetAccessControl(security);
     }

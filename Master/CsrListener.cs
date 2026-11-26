@@ -43,6 +43,9 @@ internal sealed class CsrListener : IDisposable
     private const int MaxIpEntries = 1000;
     private const int RateMaxFailures = 10;
 
+    /// <summary>Hook ภายในสำหรับเทสต์ assert ว่าไม่มี exception ระหว่าง TLS handshake</summary>
+    internal event Action<Exception>? ExceptionOccurred;
+
     public CsrListener(PairingCodeStore codes, MasterPki pki, AuditLog audit, IPAddress bindAddress, int port)
     {
         _codes = codes;
@@ -54,11 +57,6 @@ internal sealed class CsrListener : IDisposable
     }
 
     public void Start()
-    {
-        StartAsync().GetAwaiter().GetResult();
-    }
-
-    private async Task StartAsync()
     {
         lock (_gate)
         {
@@ -220,13 +218,13 @@ internal sealed class CsrListener : IDisposable
                 byte[] nonceA = Convert.FromHexString(nonceAHex);
                 byte[] transcriptHash = Convert.FromHexString(transcriptHex);
 
-                // Transcript covers all exchanged messages so far (anti-downgrade)
-                byte[] transcript = EnrollmentChannel.TranscriptHash(
+                // Transcript สำหรับตรวจ agent proof: รวมเฉพาะข้อความที่แลกเปลี่ยนก่อน PROOF ของ agent
+                // (CODE + NONCE เท่านั้น ไม่รวม agentLine เอง เพราะยังไม่ถูกส่งตอนคำนวณ proof)
+                byte[] agentTranscript = EnrollmentChannel.TranscriptHash(
                     Encoding.UTF8.GetBytes(codeLine),
-                    Encoding.UTF8.GetBytes(nonceLine),
-                    Encoding.UTF8.GetBytes(agentLine));
+                    Encoding.UTF8.GetBytes(nonceLine));
 
-                byte[] expectedAgent = EnrollmentChannel.ComputeAgentProof(k, nonceA, nonceM, transcript);
+                byte[] expectedAgent = EnrollmentChannel.ComputeAgentProof(k, nonceA, nonceM, agentTranscript);
                 if (!EnrollmentChannel.VerifyProof(expectedAgent, agentProof))
                 {
                     RecordFailure(ip, code, "agent-proof-mismatch");
@@ -235,7 +233,13 @@ internal sealed class CsrListener : IDisposable
                 }
 
                 // --- Step 5: Master sends its proof ---
-                byte[] masterProof = EnrollmentChannel.ComputeMasterProof(k, nonceM, nonceA, transcript);
+                // Transcript สำหรับ master proof: รวมทุกข้อความจนถึง agentLine
+                byte[] masterTranscript = EnrollmentChannel.TranscriptHash(
+                    Encoding.UTF8.GetBytes(codeLine),
+                    Encoding.UTF8.GetBytes(nonceLine),
+                    Encoding.UTF8.GetBytes(agentLine));
+
+                byte[] masterProof = EnrollmentChannel.ComputeMasterProof(k, nonceM, nonceA, masterTranscript);
                 await WriteLineAsync(ssl, $"PROOF {Convert.ToHexString(masterProof)}");
 
                 // --- Step 6: Client sends machine name ---
@@ -324,6 +328,14 @@ internal sealed class CsrListener : IDisposable
             }
             catch (Exception ex)
             {
+                // InvalidDataException คือ protocol violation ตามปกติ (เช่น ส่งบรรทุดยาวเกิน 8 KB)
+                // IOException/SocketException คือการตัดการเชื่อมต่อตามปกติ (client ปิด socket ก่อนอ่านจบ)
+                // สองกรณีนี้ไม่ใช่ exception ที่ไม่คาดคิด → ไม่ raise ExceptionOccurred
+                if (ex is not InvalidDataException and not IOException and not SocketException)
+                {
+                    ExceptionOccurred?.Invoke(ex);
+                    Diag.Error("CsrListener.HandleClientAsync", ex.ToString(), ex);
+                }
                 RecordFailure(ip, null, "exception:" + ex.GetType().Name);
                 try { await WriteLineAsync(stream, "REJECT internal-error"); } catch { }
             }
@@ -420,7 +432,24 @@ internal sealed class CsrListener : IDisposable
             ecdsa, HashAlgorithmName.SHA256);
         req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
         req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.DigitalSignature, true));
-        return req.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddHours(1));
+
+        // Export PFX ในหน่วยความจำแล้วโหลดกลับด้วย X509KeyStorageFlags.Exportable (ไม่ใช้ PersistKeySet, ไม่ลง key store)
+        // วิธีเดียวกับ C2a (ControlTls.CreateSchannelCertificate) ให้ Schannel บน Windows รับ private key ได้
+        var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddHours(1));
+        const string password = "RainDrop-Temp-Cert";
+        byte[] pfx = cert.Export(X509ContentType.Pfx, password);
+        try
+        {
+            var result = new X509Certificate2(pfx, password, X509KeyStorageFlags.Exportable);
+            if (!result.HasPrivateKey)
+                throw new CryptographicException("Master temp cert has no private key after PFX round-trip");
+            return result;
+        }
+        finally
+        {
+            Array.Clear(pfx);
+            cert.Dispose(); // กัน handle leak ของ cert ต้นฉบับหลัง export PFX แล้ว
+        }
     }
 
     private sealed class RateEntry
